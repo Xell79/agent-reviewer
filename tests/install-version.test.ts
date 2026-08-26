@@ -56,6 +56,9 @@ test("install.sh reports in sync after copy", async () => {
 	expect(stderr).toBe("");
 	expect(stdout).toContain(`version: repo ${VERSION}  dest ${VERSION}`);
 	expect(stdout).toContain("in sync");
+	expect(
+		await Bun.file(join(dest, "plugin", "lib", "least-connections.ts")).exists(),
+	).toBe(true);
 });
 
 test("install.sh reports update available when dest PLUGIN_VERSION is old", async () => {

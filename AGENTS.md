@@ -13,7 +13,7 @@
 |---|---|
 | Path | `~/.config/kilo/plugin/agent-reviewer.ts` |
 | Version | Root `VERSION` = `export const PLUGIN_VERSION` in source. Bump both together. GitHub Release on tag `vX.Y.Z`. |
-| Export | `export default AgentReviewerPlugin` (+ named `AgentReviewerPlugin`) |
+| Export | **Only** `export default AgentReviewerPlugin` (+ named `AgentReviewerPlugin`). Extra named exports are invoked as factories and crash load. |
 | Loader | Auto-scan `plugin/*.{ts,js}` under Kilo config root. **No** `plugin` entry in `kilo.jsonc` required. |
 | Options | Auto-scan **does not** pass options → live chain is **`~/.config/kilo/agent-reviewer.json`**. Empty/missing file → `FALLBACK_TIERS = []` (fail-closed). `opts.tiers` / `opts.skip` / `opts.cache` only if somehow factory-invoked with options. |
 | Runtime | Bun (Kilo plugin host). Build check: `bun build plugin/agent-reviewer.ts --outfile=/tmp/ar-check.js --target=bun` from `~/.config/kilo`. |
@@ -600,7 +600,8 @@ permission.asked (not in skip)
 |------|------|
 | `VERSION` | Semver; keep equal to `PLUGIN_VERSION`. Not installed to dest. |
 | `CHANGELOG.md` | Keep a Changelog; `gh release create` notes from `## [X.Y.Z]`. |
-| `agent-reviewer.ts` | Implementation (`PLUGIN_VERSION` logged on import / load) |
+| `agent-reviewer.ts` | Implementation (`PLUGIN_VERSION` not a named export) |
+| `lib/least-connections.ts` | Selector helpers (copied to dest `plugin/lib/`; auto-scan is non-recursive) |
 | `tui/agent-reviewer-tui.tsx` | Reason overlay on escalate (native Permit/Reject) |
 | `scripts/install.sh` | Install/update plugin + TUI + example (**never** writes `agent-reviewer.json`; no markdown; checksum skip). Incomplete cache clone is repaired (`fetch` + `reset --hard`). After copy: `repo VERSION` vs dest `PLUGIN_VERSION`. |
 | `install.sh` | Root wrapper → `scripts/install.sh` |
@@ -608,7 +609,7 @@ permission.asked (not in skip)
 | `README.md` | Human operator guide |
 | `AGENTS.md` | This file — agent constraints & APIs |
 
-Do not invent a parallel plugin under `lib/` for auto-scan
-unless deliberately **not** auto-loading (historical note:
-`lib/` was used when `plugin/` auto-scan + options conflicted;
-current design is auto-scan + JSON config, empty in-source fallback).
+`lib/` under the **repo** is helper modules imported by the plugin
+entrypoint. Dest copy is `~/.config/kilo/plugin/lib/` — auto-scan is
+`plugin/*.{ts,js}` (non-recursive), so those files are not loaded as
+plugins. Do **not** add extra named exports to `agent-reviewer.ts`.

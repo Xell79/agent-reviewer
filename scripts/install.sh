@@ -403,6 +403,7 @@ if [[ "$DRY_RUN" -eq 0 ]] && ! checkout_looks_like_repo "$ROOT"; then
 fi
 
 install_file "$ROOT/agent-reviewer.ts" "$DEST/plugin/agent-reviewer.ts"
+install_file "$ROOT/lib/least-connections.ts" "$DEST/plugin/lib/least-connections.ts"
 install_file "$ROOT/tui/agent-reviewer-tui.tsx" "$DEST/tui/agent-reviewer-tui.tsx"
 install_file "$ROOT/agent-reviewer.json.example" "$DEST/plugin/agent-reviewer.json.example"
 ensure_tui_jsonc

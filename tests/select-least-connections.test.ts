@@ -4,7 +4,7 @@ import {
 	incrementActive,
 	selectLeastConnections,
 	withTierConnection,
-} from "../agent-reviewer.ts";
+} from "../lib/least-connections.ts";
 
 const tiers = [{ name: "a" }, { name: "b" }, { name: "c" }];
 
