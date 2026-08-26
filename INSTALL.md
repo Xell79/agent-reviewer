@@ -1,5 +1,12 @@
 # agent-reviewer — install / layout
 
+## Version
+
+Root [`VERSION`](./VERSION) matches `PLUGIN_VERSION` in `agent-reviewer.ts`.
+Install from **git main**, not GitHub Release assets. After copy the
+script compares those two strings. Releases:
+<https://github.com/Xell79/agent-reviewer/releases>
+
 ## Canonical live path (this machine)
 
 | Item | Path |
@@ -73,7 +80,9 @@ curl -fsSL https://raw.githubusercontent.com/Xell79/agent-reviewer/main/scripts/
 ```
 
 Copies `agent-reviewer.ts`, TUI overlay, and `agent-reviewer.json.example`.
-Does not copy markdown. Ensures `tui.jsonc` lists the overlay.
+Does not copy markdown, `VERSION`, or `CHANGELOG.md`. Prints
+`version: repo … dest …` then `in sync` or `update available`.
+Ensures `tui.jsonc` lists the overlay.
 **Never writes `agent-reviewer.json`** (keys). If that
 file is missing, copy `agent-reviewer.json.example` yourself, fill
 `{PROVIDER_KEY}`, `chmod 600`. Restart Kilo after install.

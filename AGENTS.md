@@ -12,6 +12,7 @@
 | | |
 |---|---|
 | Path | `~/.config/kilo/plugin/agent-reviewer.ts` |
+| Version | Root `VERSION` = `export const PLUGIN_VERSION` in source. Bump both together. GitHub Release on tag `vX.Y.Z`. |
 | Export | `export default AgentReviewerPlugin` (+ named `AgentReviewerPlugin`) |
 | Loader | Auto-scan `plugin/*.{ts,js}` under Kilo config root. **No** `plugin` entry in `kilo.jsonc` required. |
 | Options | Auto-scan **does not** pass options → live chain is **`~/.config/kilo/agent-reviewer.json`**. Empty/missing file → `FALLBACK_TIERS = []` (fail-closed). `opts.tiers` / `opts.skip` / `opts.cache` only if somehow factory-invoked with options. |
@@ -404,7 +405,7 @@ without explicit user instruction. Summary:
 
 ### dlog phases (implementer checklist)
 
-- `import`, `factory.enter`, `factory.hooks_ready`
+- `import` (`version`), `factory.enter`, `factory.hooks_ready` (`version`)
 - `hook.tool.execute.before`
 - `event`, `event.permission.asked`, skips
 - `review.start` + **`userContent`**
@@ -420,7 +421,7 @@ without explicit user instruction. Summary:
 
 ### app.log messages (attribution)
 
-- `plugin loaded` — tier **names**
+- `plugin loaded` — `version`, tier **names**
 - `review start` — permission, patterns, command, tier names
 - **`tier result`** — **`tier`, `model`, `decision`, `reason`** (who decided)
 - `escalating to human` — includes **`model`**
@@ -581,9 +582,11 @@ permission.asked (not in skip)
 
 | File | Role |
 |------|------|
-| `agent-reviewer.ts` | Implementation |
+| `VERSION` | Semver; keep equal to `PLUGIN_VERSION`. Not installed to dest. |
+| `CHANGELOG.md` | Keep a Changelog; `gh release create` notes from `## [X.Y.Z]`. |
+| `agent-reviewer.ts` | Implementation (`PLUGIN_VERSION` logged on import / load) |
 | `tui/agent-reviewer-tui.tsx` | Reason overlay on escalate (native Permit/Reject) |
-| `scripts/install.sh` | Install/update plugin + TUI + example (**never** writes `agent-reviewer.json`; no markdown; checksum skip). Incomplete cache clone is repaired (`fetch` + `reset --hard`). |
+| `scripts/install.sh` | Install/update plugin + TUI + example (**never** writes `agent-reviewer.json`; no markdown; checksum skip). Incomplete cache clone is repaired (`fetch` + `reset --hard`). After copy: `repo VERSION` vs dest `PLUGIN_VERSION`. |
 | `install.sh` | Root wrapper → `scripts/install.sh` |
 | `scripts/gate_suite_unified.py` | Optional harness against live JSON keys |
 | `README.md` | Human operator guide |

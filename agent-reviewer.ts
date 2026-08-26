@@ -19,6 +19,9 @@
  * Hot-reload: mtime of config re-read on each permission.asked (no Kilo restart).
  */
 
+/** Semver; keep in sync with root `VERSION`. */
+export const PLUGIN_VERSION = "0.1.0";
+
 // ---------------------------------------------------------------------------
 // File-based debug log (survives when client.app.log is silent / hanging).
 // Dedicated under XDG data — NOT mixed into opencode.log. Size-rotated.
@@ -241,9 +244,13 @@ function safeJson(v: unknown): string {
 try {
 	appendLogLine(
 		LOAD_LOG,
-		`${new Date().toISOString()} import pid=${process.pid} cwd=${process.cwd()}\n`,
+		`${new Date().toISOString()} import pid=${process.pid} version=${PLUGIN_VERSION} cwd=${process.cwd()}\n`,
 	);
-	dlog("import", { cwd: process.cwd(), logDir: LOG_DIR });
+	dlog("import", {
+		version: PLUGIN_VERSION,
+		cwd: process.cwd(),
+		logDir: LOG_DIR,
+	});
 } catch {
 	// ignore
 }
@@ -1404,6 +1411,7 @@ export const AgentReviewerPlugin = async (
 
 	// MUST NOT await client.app.log here — blocks hook registration (bV4 awaits factory).
 	log(client, "info", "plugin loaded", {
+		version: PLUGIN_VERSION,
 		order: boot.order,
 		tiers: boot.tiers.map((t) => t.name),
 		skip: boot.skip,
@@ -1415,6 +1423,7 @@ export const AgentReviewerPlugin = async (
 		ms: Date.now() - t0,
 	});
 	dlog("factory.hooks_ready", {
+		version: PLUGIN_VERSION,
 		order: boot.order,
 		tiers: boot.tiers.map((t) => t.name),
 		tierKeys: boot.tiers.map((t) => ({

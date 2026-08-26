@@ -228,6 +228,42 @@ pick_hash_cmd() {
 	exit 1
 }
 
+# Semver from dest/source plugin (PLUGIN_VERSION = "x.y.z"). Missing → unknown.
+plugin_version_from_ts() {
+	local f="$1"
+	local v=""
+	if [[ -f "$f" ]]; then
+		v="$(sed -n 's/.*PLUGIN_VERSION[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -n 1)"
+	fi
+	if [[ -z "$v" ]]; then
+		printf 'unknown\n'
+	else
+		printf '%s\n' "$v"
+	fi
+}
+
+repo_version() {
+	local f="$ROOT/VERSION"
+	if [[ ! -f "$f" ]]; then
+		printf 'unknown\n'
+		return 0
+	fi
+	tr -d '[:space:]' <"$f"
+	printf '\n'
+}
+
+report_version_drift() {
+	local repo dest_ver
+	repo="$(repo_version)"
+	dest_ver="$(plugin_version_from_ts "$DEST/plugin/agent-reviewer.ts")"
+	echo "version: repo ${repo}  dest ${dest_ver}"
+	if [[ "$repo" == "$dest_ver" && "$repo" != "unknown" ]]; then
+		echo "in sync"
+	else
+		echo "update available: dest ${dest_ver} → repo ${repo}"
+	fi
+}
+
 file_hash() {
 	local f="$1"
 	[[ -f "$f" ]] || return 1
@@ -370,6 +406,7 @@ install_file "$ROOT/agent-reviewer.ts" "$DEST/plugin/agent-reviewer.ts"
 install_file "$ROOT/tui/agent-reviewer-tui.tsx" "$DEST/tui/agent-reviewer-tui.tsx"
 install_file "$ROOT/agent-reviewer.json.example" "$DEST/plugin/agent-reviewer.json.example"
 ensure_tui_jsonc
+report_version_drift
 
 LIVE_JSON="$DEST/agent-reviewer.json"
 if [[ -e "$LIVE_JSON" ]]; then

@@ -10,6 +10,7 @@ ask for permission.
 
 | | |
 |---|---|
+| Version | [`VERSION`](./VERSION) = `PLUGIN_VERSION` in the plugin ([changelog](./CHANGELOG.md)) |
 | Plugin | `~/.config/kilo/plugin/agent-reviewer.ts` (auto-scan) |
 | Overlay | `~/.config/kilo/tui/agent-reviewer-tui.tsx` via `tui.jsonc` |
 | Config | `~/.config/kilo/agent-reviewer.json` (`chmod 600`, operator-owned) |
@@ -33,6 +34,8 @@ curl -fsSL https://raw.githubusercontent.com/Xell79/agent-reviewer/main/scripts/
 Needs `git`, `python3`, and a checksum tool
 (`sha256sum`/`sha256`/`md5sum`/`md5`/`openssl`).
 Copies plugin + TUI + example only if the dest checksum differs.
+Does **not** copy `VERSION` or `CHANGELOG.md`. Prints
+`version: repo … dest …` then `in sync` or `update available`.
 **Never** writes `agent-reviewer.json`.
 
 If the live JSON is missing:
@@ -44,6 +47,8 @@ chmod 600 ~/.config/kilo/agent-reviewer.json
 ```
 
 Restart Kilo. Confirm: `tail -5 ~/.local/share/kilo/log/agent-reviewer/load.log`
+(line includes `version=`). GitHub Releases:
+<https://github.com/Xell79/agent-reviewer/releases>
 
 <details>
 <summary>Manual copy and tui.jsonc</summary>
@@ -160,6 +165,7 @@ Full redacted snapshot: [`agent-reviewer.json.example`](./agent-reviewer.json.ex
 | Primary never called | empty `apiKey` → immediate 30m cooldown; or empty `order` |
 | Always skips a tier | `tier.skip_cooldown` — wait 30m or restart |
 | Config ignored | JSON is hot-reloaded; `.ts` needs restart |
+| Dest behind repo | `install.sh` prints `update available: dest X → repo Y` |
 
 </details>
 
@@ -204,6 +210,8 @@ bun build plugin/agent-reviewer.ts --outfile=/tmp/ar-check.js --target=bun
 
 | Path | Role |
 |------|------|
+| `VERSION` | Semver (source of truth; not copied to dest) |
+| `CHANGELOG.md` | Keep a Changelog; GitHub Release notes |
 | `scripts/install.sh` | Install/update (**never** writes live JSON) |
 | `AGENTS.md` | Hooks, schemas, edit constraints |
 | `LICENSE` | MIT |
