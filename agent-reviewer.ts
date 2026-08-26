@@ -6,9 +6,10 @@
  *
  * Tiers: direct OpenAI-compatible (or Cohere v2) fetch per entry in config.
  * Fail-closed: all tiers operationally fail → leave request to human.
- * First definitive decision (approve or escalate) stops the chain; next tier
- * only on operational failure (HTTP/timeout/empty/unparseable).
- * Operational failure of a tier → that tier is skipped for tierCooldownMs
+ * First definitive decision (approve or escalate) stops the request; next tier
+ * only on operational failure (HTTP/timeout/empty/unparseable). Concurrent
+ * reviews pick the least-loaded non-cooling unattempted tier (`order` is the
+ * tie-breaker). Operational failure of a tier → skipped for tierCooldownMs
  * (from config, default 30m) so 429/timeouts do not hammer every permission.asked.
  *
  * Config: ~/.config/kilo/agent-reviewer.json (or AGENT_REVIEWER_CONFIG)
@@ -20,7 +21,7 @@
  */
 
 /** Semver; keep in sync with root `VERSION`. */
-export const PLUGIN_VERSION = "0.1.0";
+export const PLUGIN_VERSION = "0.2.0";
 
 // ---------------------------------------------------------------------------
 // File-based debug log (survives when client.app.log is silent / hanging).
@@ -293,6 +294,79 @@ type TierConfig = {
 	 */
 	reasoningEffort?: string;
 };
+
+/**
+ * Least-connections pick among runtime `order`. Tie-break = array index.
+ * Pure: no Date.now(); caller supplies cooling names. Missing map entries = 0.
+ */
+export function selectLeastConnections<T extends { name: string }>(
+	tiers: readonly T[],
+	activeCounts: ReadonlyMap<string, number>,
+	attempted: ReadonlySet<string>,
+	cooling: ReadonlySet<string>,
+): T | null {
+	let best: T | null = null;
+	let bestActive = Number.POSITIVE_INFINITY;
+	let bestIndex = Number.POSITIVE_INFINITY;
+	for (let i = 0; i < tiers.length; i++) {
+		const t = tiers[i];
+		if (attempted.has(t.name) || cooling.has(t.name)) continue;
+		const active = activeCounts.get(t.name) ?? 0;
+		if (active < bestActive || (active === bestActive && i < bestIndex)) {
+			best = t;
+			bestActive = active;
+			bestIndex = i;
+		}
+	}
+	return best;
+}
+
+/** Positive counts only — delete the key at 0 so stale names cannot stick. */
+export function incrementActive(
+	map: Map<string, number>,
+	name: string,
+): number {
+	const n = (map.get(name) ?? 0) + 1;
+	map.set(name, n);
+	return n;
+}
+
+export function decrementActive(
+	map: Map<string, number>,
+	name: string,
+): number {
+	const n = (map.get(name) ?? 0) - 1;
+	if (n <= 0) {
+		map.delete(name);
+		return 0;
+	}
+	map.set(name, n);
+	return n;
+}
+
+export function activeCountSnapshot(
+	tiers: readonly { name: string }[],
+	activeCounts: ReadonlyMap<string, number>,
+): { name: string; active: number }[] {
+	return tiers.map((t) => ({
+		name: t.name,
+		active: activeCounts.get(t.name) ?? 0,
+	}));
+}
+
+/** Count one HTTP connection for `name` until `fn` settles (success or throw). */
+export async function withTierConnection<T>(
+	map: Map<string, number>,
+	name: string,
+	fn: () => Promise<T>,
+): Promise<T> {
+	incrementActive(map, name);
+	try {
+		return await fn();
+	} finally {
+		decrementActive(map, name);
+	}
+}
 
 /** One enabled chain entry is just a name into `tiers` map. */
 type TierOrder = string[];
@@ -1362,6 +1436,8 @@ export const AgentReviewerPlugin = async (
 		string,
 		{ untilMs: number; error: string; failedAt: number }
 	>();
+	/** Positive in-flight HTTP counts per tier.name (least-connections). */
+	const activeConnections = new Map<string, number>();
 
 	const isTierCooling = (
 		name: string,
@@ -1375,6 +1451,22 @@ export const AgentReviewerPlugin = async (
 		}
 		return { cooling: true, remainMs, error: entry.error };
 	};
+
+	const coolingNames = (
+		list: readonly { name: string }[],
+	): Set<string> => {
+		const out = new Set<string>();
+		for (const t of list) {
+			if (isTierCooling(t.name).cooling) out.add(t.name);
+		}
+		return out;
+	};
+
+	const pickTier = (
+		list: readonly TierConfig[],
+		attempted: ReadonlySet<string>,
+	): TierConfig | null =>
+		selectLeastConnections(list, activeConnections, attempted, coolingNames(list));
 
 	const markTierCooldown = (name: string, err: unknown, cooldownMs: number) => {
 		const error = err instanceof Error ? err.message : String(err);
@@ -1576,7 +1668,7 @@ export const AgentReviewerPlugin = async (
 					command:
 						typeof metadata.command === "string" ? metadata.command : undefined,
 				};
-				const firstLive = tiers.find((t) => !isTierCooling(t.name).cooling);
+				const firstLive = pickTier(tiers, new Set());
 				writePendingEscalate({
 					...overlayBase,
 					reason: "gate reviewing…",
@@ -1685,27 +1777,43 @@ export const AgentReviewerPlugin = async (
 				});
 
 				try {
-					for (const tier of tiers) {
-						const cool = isTierCooling(tier.name);
-						if (cool.cooling) {
+					const attempted = new Set<string>();
+					const cooldownLogged = new Set<string>();
+					while (true) {
+						for (const t of tiers) {
+							if (attempted.has(t.name) || cooldownLogged.has(t.name)) continue;
+							const cool = isTierCooling(t.name);
+							if (!cool.cooling) continue;
+							cooldownLogged.add(t.name);
 							const remainSec = Math.ceil(cool.remainMs / 1000);
 							log(client, "info", "tier cooldown skip; next tier", {
 								requestID,
-								tier: tier.name,
-								model: tier.model,
+								tier: t.name,
+								model: t.model,
 								remainSec,
 								lastError: cool.error,
 							});
 							dlog("tier.skip_cooldown", {
 								requestID,
-								tier: tier.name,
-								model: tier.model,
+								tier: t.name,
+								model: t.model,
 								remainMs: cool.remainMs,
 								remainSec,
 								lastError: cool.error,
 							});
-							continue;
 						}
+
+						const tier = pickTier(tiers, attempted);
+						if (!tier) break;
+						attempted.add(tier.name);
+
+						const counts = activeCountSnapshot(tiers, activeConnections);
+						dlog("tier.select", {
+							requestID,
+							tier: tier.name,
+							active: activeConnections.get(tier.name) ?? 0,
+							activeCounts: counts,
+						});
 
 						try {
 							const models = tierModels(tier);
@@ -1714,6 +1822,8 @@ export const AgentReviewerPlugin = async (
 								tier: tier.name,
 								model: models[0],
 								fallbackModels: models.slice(1),
+								active: activeConnections.get(tier.name) ?? 0,
+								activeCounts: counts,
 							});
 							writePendingEscalate({
 								...overlayBase,
@@ -1722,7 +1832,11 @@ export const AgentReviewerPlugin = async (
 								model: models[0],
 								at: Date.now(),
 							});
-							const result = await callReviewer(tier, messages, requestID);
+							const result = await withTierConnection(
+								activeConnections,
+								tier.name,
+								() => callReviewer(tier, messages, requestID),
+							);
 							const usedModel = result.model || tier.model;
 							tierConsecutiveTimeouts.delete(tier.name);
 							log(client, "info", "tier result", {
@@ -1731,6 +1845,7 @@ export const AgentReviewerPlugin = async (
 								model: usedModel,
 								decision: result.decision,
 								reason: result.reason,
+								active: activeConnections.get(tier.name) ?? 0,
 							});
 							dlog("tier.result", {
 								requestID,
@@ -1738,6 +1853,7 @@ export const AgentReviewerPlugin = async (
 								model: usedModel,
 								decision: result.decision,
 								reason: result.reason,
+								active: activeConnections.get(tier.name) ?? 0,
 							});
 
 							if (result.decision === "approve") {
@@ -1830,6 +1946,7 @@ export const AgentReviewerPlugin = async (
 								isTimeout,
 								consecutiveTimeouts: isTimeout ? tierConsecutiveTimeouts.get(tier.name) || 0 : 0,
 								cooldownMs: appliedCooldownMs,
+								active: activeConnections.get(tier.name) ?? 0,
 							});
 							dlog("tier.fail", {
 								requestID,
@@ -1840,8 +1957,9 @@ export const AgentReviewerPlugin = async (
 								isTimeout,
 								consecutiveTimeouts: isTimeout ? tierConsecutiveTimeouts.get(tier.name) || 0 : 0,
 								cooldownMs: appliedCooldownMs,
+								active: activeConnections.get(tier.name) ?? 0,
 							});
-							// continue to next tier
+							// continue: select again among remaining tiers
 						}
 					}
 

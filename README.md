@@ -81,11 +81,13 @@ Replace `YOU`. Do not overwrite a live `agent-reviewer.json`.
 ## How it works
 
 Kilo emits `permission.asked` (tools in `ask`; names in `skip`
-are ignored). The plugin sends a short payload to the first
-non-cooling tier in `order`. First definitive `approve` or
-`escalate` wins — escalate never falls through. Timeout
-(8s default, 30s MiMo) falls through without cooldown until
-3 consecutive timeouts trigger 30 min cooldown.
+are ignored). Concurrent reviews pick the least-loaded
+non-cooling unattempted tier; `order` breaks ties (a free
+lower-priority tier beats a busy primary). First definitive
+`approve` or `escalate` wins for that request — escalate never
+falls through. Timeout (8s default, 30s MiMo) falls through
+without cooldown until 3 consecutive timeouts trigger 30 min
+cooldown.
 
 <details>
 <summary>Full flow and cooldown details</summary>
@@ -93,14 +95,15 @@ non-cooling tier in `order`. First definitive `approve` or
 <br>
 
 1. `permission.asked` fires → skip if `permission` is in `skip`.
-2. Plugin sends payload + `systemPrompt` to `order[0]`.
+2. Plugin selects least-loaded non-cooling unattempted tier
+   (`order` only when counts are equal).
 3. Model answers `{"decision":"approve"|"escalate","reason":"…"}`.
-4. First definitive answer wins. Overlay is
-   `Gate reviewing · <tier>` while chain runs.
+4. First definitive answer wins **for that request**. Overlay is
+   `Gate reviewing · <tier>` while a tier is in flight.
 5. HTTP 4xx/5xx, missing key, empty/unparseable body →
-   **30 min cooldown** (first failure). Timeout falls through
-   without cooldown until **3 consecutive** timeouts.
-   Approve/escalate do not cool.
+   **30 min cooldown** (first failure), then pick again among
+   remaining tiers. Timeout falls through without cooldown until
+   **3 consecutive** timeouts. Approve/escalate do not cool.
 
 </details>
 
@@ -148,10 +151,11 @@ Full redacted snapshot: [`agent-reviewer.json.example`](./agent-reviewer.json.ex
 
 ## Day to day
 
-- Routine `ls`/git/source edits → usually auto-approved by primary.
+- Routine `ls`/git/source edits → usually auto-approved (idle → primary).
+- Concurrent asks may be decided by a lower-priority idle tier.
 - `sudo`, `rm -rf`, `.env`, force-push → escalate (you click).
-- HTTP/5xx on a tier → 30 min cooldown; request continues down `order`.
-- One timeout → next tier, primary still tried next ask.
+- HTTP/5xx on a tier → 30 min cooldown; this request picks again.
+- One timeout → next remaining tier, primary still tried next ask.
   Three consecutive → 30 min cooldown.
 
 <details>
@@ -188,6 +192,7 @@ Override dir: `AGENT_REVIEWER_LOG_DIR`.
 <br>
 
 Useful `dlog` phases: `review.start` (`userContent`),
+`tier.select` (selected name + `activeCounts`),
 `tier.request`/`tier.response` (sensitive), `tier.result`,
 `tier.fail` (`isTimeout`, `consecutiveTimeouts`,
 `cooldownMs`; `0` = no cooldown yet), `tier.cooldown`,

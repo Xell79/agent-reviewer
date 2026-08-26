@@ -34,21 +34,33 @@ Auto-reply only on `approve`. Never auto-reject; escalate = leave for human.
 ### First-definitive (LOCKED)
 
 ```text
-for tier in tiers:
+attempted = {}
+while true:
+  tier = least_connections(non-cooling, not in attempted)
+           # key = (activeCount, orderIndex)
+  if no tier: break
+  attempted.add(tier)
   try:
-    result = callReviewer(tier)
+    result = callReviewer(tier)   # +1 active until promise settles
     if result.decision == approve: reply once; return
     if result.decision == escalate: return   # do NOT call next tier
   catch:
-    log fail; continue to next tier
+    log fail; continue  # pick again among remaining
 all failed → leave for human (fail-closed)
 ```
 
-- **Both** approve and escalate stop the chain.
+- **Both** approve and escalate stop **this request**.
 - Next tier **only** on throw from `callReviewer`: missing key,
   HTTP !ok, abort/timeout, empty content, parse failure **and**
-  heuristic fails. Fall-through of this request is independent of
+  heuristic fails. Same request never retries a name already in
+  `attempted`. Fall-through of this request is independent of
   whether a cooldown is marked.
+- **Least-connections (LOCKED with first-definitive):** among
+  non-cooling unattempted tiers, pick min `activeConnections`,
+  then `order` index. Idle lower-priority beats busy primary.
+  Count +1 immediately before `callReviewer`, −1 in `finally`
+  (including throw). `fallbackModels` are one connection.
+  Cache hits do not count. No weights/limits/queue.
 - **Tier cooldown (LOCKED):**
   - **Non-timeout** throw (HTTP 4xx/5xx, missing key, empty,
     unparsable): mark `tier.name` cooling for `TIER_COOLDOWN_MS`
@@ -409,10 +421,11 @@ without explicit user instruction. Summary:
 - `hook.tool.execute.before`
 - `event`, `event.permission.asked`, skips
 - `review.start` + **`userContent`**
+- `tier.select` (selected name, `active`, `activeCounts` snapshot)
 - `tier.call`, **`tier.request`** (`max_tokens`, `jsonObject`),
   **`tier.response`** (`text_head`, `text_tail`, `finish`)
 - `tier.result`, `tier.fail` (`isTimeout`, `consecutiveTimeouts`,
-  `cooldownMs`; `0` = timeout strike 1 or 2)
+  `cooldownMs`; `0` = timeout strike 1 or 2; `active`)
 - `tier.cooldown` (HTTP/5xx/empty/parse/missing key on first fail;
   timeout only after 3 consecutive: `untilMs`, `error`)
 - `tier.skip_cooldown` (later ask while cooling: `remainMs`, `lastError`)
@@ -531,14 +544,15 @@ trial (sleep ~3s between calls).
 
 | ID | Probe | Expect |
 |----|-------|--------|
-| B | Ordinary bash (`ls`) | Primary (`ollama-gemma4-31b`) approve; dlog `tier.result decision=approve`; app.log `tier result` has model; TUI “approved by you” |
-| C1 | `sudo …` | Primary escalate; **no** next-tier `tier.call` after definitive escalate |
+| B | Ordinary bash (`ls`), idle | Highest-priority live (`ollama-gemma4-31b`) approve; dlog `tier.select` then `tier.result decision=approve`; app.log `tier result` has model; TUI “approved by you” |
+| B2 | Two concurrent asks, idle | First `tier.select` primary; second `tier.select` next in `order`; after both settle, next ask returns to primary |
+| C1 | `sudo …`, idle | Primary escalate; **no** next-tier `tier.call` after definitive escalate |
 | C2a | Force primary **HTTP/key** fail | `ollama-gemma4-31b` `tier.fail` + **immediate** `tier.cooldown` → `groq-qwen36-27b` `tier.call`; next ask: `tier.skip_cooldown` for primary |
-| C2b | Force primary **timeout** (once) | `tier.fail` `isTimeout=true` `cooldownMs=0` → next tier; **next ask still tries primary** (no `tier.skip_cooldown`) |
+| C2b | Force primary **timeout** (once) | `tier.fail` `isTimeout=true` `cooldownMs=0` → next remaining tier; **next ask still tries primary** (no `tier.skip_cooldown`) |
 | C2c | Three consecutive primary timeouts | third `tier.fail` applies `tier.cooldown`; later ask: `tier.skip_cooldown` |
-| D | Reach gateway | `model=poolside/laguna-s-2.1:free` |
+| D | Reach gateway | `model=poolside/laguna-s-2.1:free` (only if earlier `order` names are cooling/busy/failed) |
 | E | mkfs / .env edit | escalate, never approve |
-| F | dlog shape | `review.start.userContent`; per tier `tier.request` then `tier.response`; those fields **absent** from opencode.log |
+| F | dlog shape | `review.start.userContent`; `tier.select`; per tier `tier.request` then `tier.response`; those fields **absent** from opencode.log |
 
 ---
 
@@ -551,11 +565,13 @@ permission.asked (not in skip)
   cache hit? ──yes──► approve? ──yes──► reply once
         │ no              └── no ──► human
         ▼
-  for tier in order (from agent-reviewer.json):
+  while remaining non-cooling unattempted:
+        pick least (activeCount, orderIndex)
+        +1 active; callReviewer; −1 in finally
         │
-        ├─ HTTP/empty/unparsable/missing key ──► cooldown + next tier
+        ├─ HTTP/empty/unparsable/missing key ──► cooldown + pick again
         │
-        ├─ timeout (AbortError) ──► next tier; cooldown only if 3 consecutive
+        ├─ timeout (AbortError) ──► pick again; cooldown only if 3 consecutive
         │
         ├─ decision approve ──► reply once; STOP
         │
