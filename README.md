@@ -24,7 +24,8 @@ Agent/implementer reference: **[AGENTS.md](./AGENTS.md)**.
 ## Install
 
 ```bash
-./scripts/install.sh
+./install.sh
+# or ./scripts/install.sh
 # or
 curl -fsSL https://raw.githubusercontent.com/Xell79/agent-reviewer/main/scripts/install.sh | bash
 ```

@@ -50,7 +50,7 @@ all failed → leave for human (fail-closed)
   whether a cooldown is marked.
 - **Tier cooldown (LOCKED):**
   - **Non-timeout** throw (HTTP 4xx/5xx, missing key, empty,
-    unparseable): mark `tier.name` cooling for `TIER_COOLDOWN_MS`
+    unparsable): mark `tier.name` cooling for `TIER_COOLDOWN_MS`
     (default **30 minutes**, in-memory) on the **first** failure.
     Later requests **skip** that tier (`tier.skip_cooldown`) until
     `untilMs` or process restart. Missing key also cools (avoids
@@ -133,7 +133,8 @@ That file holds API keys. The operator edits it by hand. Repo ships only
 `agent-reviewer.json.example` (placeholders). `scripts/install.sh` clones
 or updates the public repo, copies plugin + TUI + example (**not**
 markdown), skips dest files whose checksum matches, and **refuses** any
-path whose basename is `agent-reviewer.json`. If the live file is missing,
+path whose basename is `agent-reviewer.json`. Incomplete cache clones
+are repaired (`fetch` + `reset --hard`). If the live file is missing,
 print how to copy the example — do not write it. The gate has **no**
 npm/pip install; Kilo loads the `.ts` file directly.
 
@@ -551,7 +552,7 @@ permission.asked (not in skip)
         ▼
   for tier in order (from agent-reviewer.json):
         │
-        ├─ HTTP/empty/unparseable/missing key ──► cooldown + next tier
+        ├─ HTTP/empty/unparsable/missing key ──► cooldown + next tier
         │
         ├─ timeout (AbortError) ──► next tier; cooldown only if 3 consecutive
         │
@@ -582,7 +583,8 @@ permission.asked (not in skip)
 |------|------|
 | `agent-reviewer.ts` | Implementation |
 | `tui/agent-reviewer-tui.tsx` | Reason overlay on escalate (native Permit/Reject) |
-| `scripts/install.sh` | Install/update plugin + TUI + example (**never** writes `agent-reviewer.json`; no markdown; checksum skip) |
+| `scripts/install.sh` | Install/update plugin + TUI + example (**never** writes `agent-reviewer.json`; no markdown; checksum skip). Incomplete cache clone is repaired (`fetch` + `reset --hard`). |
+| `install.sh` | Root wrapper → `scripts/install.sh` |
 | `scripts/gate_suite_unified.py` | Optional harness against live JSON keys |
 | `README.md` | Human operator guide |
 | `AGENTS.md` | This file — agent constraints & APIs |

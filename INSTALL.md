@@ -59,12 +59,14 @@ prints the same).
 From a clone:
 
 ```bash
-./scripts/install.sh
-# optional: ./scripts/install.sh --dry-run
-# optional: ./scripts/install.sh --dest /path/to/kilo-config
+./install.sh
+# optional: ./install.sh --dry-run
+# optional: ./install.sh --dest /path/to/kilo-config
 ```
 
-Without a clone (script clones into `~/.local/share/kilo/src/agent-reviewer`):
+Without a clone (script clones into
+`~/.local/share/kilo/src/agent-reviewer`; an incomplete leftover
+checkout there is repaired with `git fetch` + `reset --hard`):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Xell79/agent-reviewer/main/scripts/install.sh | bash

@@ -12,6 +12,7 @@ SRC_DIR="${AGENT_REVIEWER_SRC:-${XDG_DATA_HOME:-${HOME}/.local/share}/kilo/src/a
 DEST="${KILO_CONFIG:-${HOME}/.config/kilo}"
 DRY_RUN=0
 NO_PULL=0
+SRC_EXPLICIT=0
 ROOT=""
 
 usage() {
@@ -56,6 +57,7 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--src)
 		SRC_DIR="${2:?--src requires a directory}"
+		SRC_EXPLICIT=1
 		shift 2
 		;;
 	--repo)
@@ -108,11 +110,56 @@ checkout_looks_like_repo() {
 	[[ -f "$d/agent-reviewer.ts" && -f "$d/tui/agent-reviewer-tui.tsx" ]]
 }
 
+normalize_git_url() {
+	local u="${1%.git}"
+	u="${u%/}"
+	u="${u#git@}"
+	u="${u#https://}"
+	u="${u#http://}"
+	u="${u#ssh://}"
+	u="${u/:/\/}"
+	printf '%s\n' "$u"
+}
+
+same_origin() {
+	local origin
+	origin="$(git -C "$ROOT" remote get-url origin 2>/dev/null || true)"
+	[[ -n "$origin" ]] || return 1
+	[[ "$(normalize_git_url "$origin")" == "$(normalize_git_url "$REPO_URL")" ]]
+}
+
+# SRC_DIR is a disposable cache. Hard-reset is OK there (force-push, leftover
+# LICENSE-only clone). Never hard-reset a checkout next to this script.
+repair_cache_checkout() {
+	echo "repairing checkout: $ROOT"
+	if [[ "$DRY_RUN" -eq 1 ]]; then
+		echo "dry-run: git -C $ROOT fetch --depth 1 origin"
+		echo "dry-run: git -C $ROOT reset --hard origin/main"
+		return 0
+	fi
+	git -C "$ROOT" fetch --depth 1 origin
+	if git -C "$ROOT" rev-parse --verify origin/main >/dev/null 2>&1; then
+		git -C "$ROOT" reset --hard origin/main
+	else
+		git -C "$ROOT" reset --hard FETCH_HEAD
+	fi
+}
+
 resolve_root() {
+	if [[ "$SRC_EXPLICIT" -eq 1 ]]; then
+		ROOT="$SRC_DIR"
+		return 0
+	fi
 	local script="${BASH_SOURCE[0]:-}"
 	if [[ -n "$script" && -f "$script" ]]; then
-		local here
-		here="$(cd "$(dirname "$script")/.." && pwd)"
+		local here dir
+		dir="$(cd "$(dirname "$script")" && pwd)"
+		# scripts/install.sh → repo root; also allow a root-level wrapper
+		if [[ "$(basename "$dir")" == "scripts" ]]; then
+			here="$(cd "$dir/.." && pwd)"
+		else
+			here="$dir"
+		fi
 		if checkout_looks_like_repo "$here"; then
 			ROOT="$here"
 			return 0
@@ -123,24 +170,42 @@ resolve_root() {
 
 fetch_repo() {
 	need_cmd git
-	if checkout_looks_like_repo "$ROOT" && [[ -d "$ROOT/.git" ]]; then
-		if [[ "$NO_PULL" -eq 1 ]]; then
-			echo "using existing checkout (no pull): $ROOT"
+	local is_cache=0
+	[[ "$ROOT" == "$SRC_DIR" ]] && is_cache=1
+
+	# Developer / local clone next to this script: copy as-is. Never pull
+	# (no upstream, dirty worktree, force-push). Cache path is disposable.
+	if [[ "$is_cache" -eq 0 ]]; then
+		if checkout_looks_like_repo "$ROOT"; then
+			echo "using local checkout: $ROOT"
 			return 0
 		fi
-		echo "updating $ROOT"
-		if [[ "$DRY_RUN" -eq 1 ]]; then
-			echo "dry-run: git -C $ROOT pull --ff-only"
-			return 0
-		fi
-		git -C "$ROOT" pull --ff-only
+		echo "REFUSED: local checkout missing plugin files: $ROOT" >&2
+		exit 1
+	fi
+
+	if checkout_looks_like_repo "$ROOT" && [[ "$NO_PULL" -eq 1 ]]; then
+		echo "using existing checkout (no pull): $ROOT"
 		return 0
 	fi
-	if [[ -e "$ROOT" && ! -d "$ROOT/.git" ]] && checkout_looks_like_repo "$ROOT"; then
+	# Complete or leftover cache (LICENSE-only after a GitHub force-push)
+	if [[ -d "$ROOT/.git" ]]; then
+		if ! same_origin; then
+			echo "REFUSED: $ROOT is a git checkout of a different repo" >&2
+			exit 1
+		fi
+		repair_cache_checkout
+		if [[ "$DRY_RUN" -eq 0 ]] && ! checkout_looks_like_repo "$ROOT"; then
+			echo "repair left $ROOT without plugin files" >&2
+			exit 1
+		fi
+		return 0
+	fi
+	if [[ -e "$ROOT" ]] && checkout_looks_like_repo "$ROOT"; then
 		echo "using existing files (not a git checkout): $ROOT"
 		return 0
 	fi
-	if [[ -e "$ROOT" && ! -d "$ROOT/.git" ]]; then
+	if [[ -e "$ROOT" ]]; then
 		echo "REFUSED: $ROOT exists and is not this repo checkout" >&2
 		exit 1
 	fi
@@ -194,7 +259,7 @@ install_file() {
 	die_if_forbidden "$dest"
 	if [[ ! -f "$src" ]]; then
 		if [[ "$DRY_RUN" -eq 1 ]]; then
-			echo "dry-run: missing source (would fail): $src"
+			echo "dry-run: would install $dest (after clone/repair)"
 			return 0
 		fi
 		echo "missing source: $src" >&2
