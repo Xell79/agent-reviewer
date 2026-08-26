@@ -1,0 +1,48 @@
+# User logrotate config for Kilo + agent-reviewer.
+# Invoked by systemd --user timer (logrotate-kilo.timer), not system /etc/logrotate.d.
+# State: ~/.local/share/logrotate/kilo.status
+#
+# logrotate does not expand $HOME. Install with:
+#   sed "s|@HOME@|$HOME|g" logrotate/kilo > ~/.config/logrotate/kilo
+#
+# Manual:
+#   logrotate --state ~/.local/share/logrotate/kilo.status ~/.config/logrotate/kilo
+#   logrotate --force --state ~/.local/share/logrotate/kilo.status ~/.config/logrotate/kilo
+
+# ---------------------------------------------------------------------------
+# Kilo main log (client.app.log sink). Process may hold the file open → copytruncate.
+# Rotate when ≥20M OR daily; keep 14 compressed generations (~30d maxage).
+# ---------------------------------------------------------------------------
+@HOME@/.local/share/kilo/log/opencode.log {
+	daily
+	size 20M
+	rotate 14
+	missingok
+	notifempty
+	compress
+	delaycompress
+	copytruncate
+	dateext
+	dateformat -%Y%m%d-%s
+	maxage 30
+}
+
+# ---------------------------------------------------------------------------
+# agent-reviewer plugin logs (dlog / load).
+# In-process size rotation also runs on each append (10 MiB, keep 5).
+# logrotate is the second line of defense across restarts / compress.
+# ---------------------------------------------------------------------------
+@HOME@/.local/share/kilo/log/agent-reviewer/*.log {
+	daily
+	size 10M
+	rotate 10
+	missingok
+	notifempty
+	compress
+	delaycompress
+	copytruncate
+	dateext
+	dateformat -%Y%m%d-%s
+	maxage 30
+	create 0600
+}

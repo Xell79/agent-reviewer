@@ -1,0 +1,9 @@
+[Unit]
+Description=Rotate Kilo and agent-reviewer logs
+Documentation=file://%h/.config/logrotate/kilo
+
+[Service]
+Type=oneshot
+# User-level logrotate: own config + state (no root /etc needed)
+ExecStart=/usr/sbin/logrotate --state %h/.local/share/logrotate/kilo.status %h/.config/logrotate/kilo
+Nice=10

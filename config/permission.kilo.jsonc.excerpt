@@ -1,0 +1,76 @@
+// Excerpt from ~/.config/kilo/kilo.jsonc — agent-reviewer integration only.
+// LAST-match-wins; bash "*":"ask" so permission.asked fires for reviewer.
+// Safe allow-list patterns bypass the gate (no permission.asked).
+// Full kilo.jsonc is NOT archived here (contains provider API keys).
+
+{
+  "permission": {
+    // LAST matching rule wins (findLast). Put broad rules first, specific overrides after.
+    // Base: auto-allow everything, then override mutating tools to "ask" for agent-reviewer.
+    "*": {
+      "*": "allow"
+    },
+    // bash: default ask (reviewer), then safe allow-list overrides (must come AFTER "*":"ask")
+    "bash": {
+      "*": "ask",
+      "find *": "allow",
+      "head *": "allow",
+      "ruff *": "allow",
+      "ruff": "allow",
+      "ls *": "allow",
+      "which *": "allow",
+      "du *": "allow",
+      "wc *": "allow",
+      "file *": "allow",
+      "rumdl *": "allow",
+      "rumdl": "allow",
+      "kilo-billing *": "allow",
+      "~/bin/kilo-billing-stats *": "allow",
+      "sed -n *": "allow",
+      "sed -e *": "allow",
+      "typos *": "allow",
+      "typos": "allow",
+      "yamllint *": "allow",
+      "yamllint": "allow",
+      "ansible-lint *": "allow",
+      "ansible-lint": "allow",
+      "pytest *": "allow",
+      "pytest": "allow",
+      "python3 -m pytest *": "allow",
+      "python -m pytest *": "allow",
+      "python3 -m ruff *": "allow",
+      "python -m ruff *": "allow",
+      "uv run pytest *": "allow",
+      "uv run ruff *": "allow",
+      "shellcheck *": "allow",
+      "shellcheck": "allow",
+      "frictionless *": "allow",
+      "frictionless": "allow",
+      // linter subagent wraps every CLI in timeout 180s — prefix must match
+      "timeout 180s ruff *": "allow",
+      "timeout 180s rumdl *": "allow",
+      "timeout 180s typos *": "allow",
+      "timeout 180s yamllint *": "allow",
+      "timeout 180s ansible-lint *": "allow",
+      "timeout 180s pytest *": "allow",
+      "timeout 180s python3 -m pytest *": "allow",
+      "timeout 180s python -m pytest *": "allow",
+      "timeout 180s python3 -m ruff *": "allow",
+      "timeout 180s python -m ruff *": "allow",
+      "timeout 180s uv run pytest *": "allow",
+      "timeout 180s uv run ruff *": "allow",
+      "timeout 180s shellcheck *": "allow",
+      "timeout 180s frictionless *": "allow"
+    },
+    // After catch-all so these win for edit/write paths
+    "edit": "ask",
+    "write": "ask",
+    "apply_patch": "ask",
+    "external_directory": {
+      "~/.kilo/*": "allow",
+      "~/.opencode/*": "allow",
+      "~/bin/*": "allow",
+      "~/*": "allow"
+    }
+  }
+}

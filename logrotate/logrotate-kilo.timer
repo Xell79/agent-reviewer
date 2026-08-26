@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily Kilo log rotation
+
+[Timer]
+OnCalendar=daily
+# Also run ~15 min after login / boot of user session
+OnBootSec=15min
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target
