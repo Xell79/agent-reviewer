@@ -46,12 +46,23 @@ all failed → leave for human (fail-closed)
 - **Both** approve and escalate stop the chain.
 - Next tier **only** on throw from `callReviewer`: missing key,
   HTTP !ok, abort/timeout, empty content, parse failure **and**
-  heuristic fails.
-- **Tier cooldown (LOCKED):** on throw, mark `tier.name` cooling for
-  `TIER_COOLDOWN_MS` (default **30 minutes**, in-memory). Later
-  requests **skip** that tier (`tier.skip_cooldown`) until `untilMs`
-  or process restart. Approve/escalate do **not** cool down.
-  Missing key also cools (avoids re-resolving env every ask).
+  heuristic fails. Fall-through of this request is independent of
+  whether a cooldown is marked.
+- **Tier cooldown (LOCKED):**
+  - **Non-timeout** throw (HTTP 4xx/5xx, missing key, empty,
+    unparseable): mark `tier.name` cooling for `TIER_COOLDOWN_MS`
+    (default **30 minutes**, in-memory) on the **first** failure.
+    Later requests **skip** that tier (`tier.skip_cooldown`) until
+    `untilMs` or process restart. Missing key also cools (avoids
+    re-resolving env every ask).
+  - **Timeout / abort** (`err.name === "AbortError"` after
+    `timeoutMs`): **do not** cool on strikes 1–2. Count consecutive
+    timeouts per `tier.name` (`tierConsecutiveTimeouts`). On the
+    **third consecutive** timeout, apply `TIER_COOLDOWN_MS` and
+    reset the counter. A success or a non-timeout error on that
+    tier **resets** the counter.
+  - Approve/escalate do **not** cool down and reset the timeout
+    counter.
 - **Do not** implement “fall through on escalate” / voting /
   second-opinion. Weaker fallbacks (or future cheap models) can
   **false-approve**; first-definitive prevents that.
@@ -120,7 +131,8 @@ overwrite, truncate, or `chmod` live `agent-reviewer.json`
 
 That file holds API keys. The operator edits it by hand. Repo ships only
 `agent-reviewer.json.example` (placeholders). `scripts/install.sh` clones
-or updates the public repo, copies plugin/TUI/docs, and **refuses** any
+or updates the public repo, copies plugin + TUI + example (**not**
+markdown), skips dest files whose checksum matches, and **refuses** any
 path whose basename is `agent-reviewer.json`. If the live file is missing,
 print how to copy the example — do not write it. The gate has **no**
 npm/pip install; Kilo loads the `.ts` file directly.
@@ -206,9 +218,13 @@ type TierConfig = {
   apiKey?: string
   apiKeyEnv?: string
   model: string
+  fallbackModels?: string[]
   timeoutMs?: number      // default 8000 in callReviewer
   maxTokens?: number      // default 512
   jsonObject?: boolean    // default false; only attach response_format when true
+  apiFormat?: "openai" | "cohere-v2"
+  thinkingBudget?: number // cohere-v2 only
+  reasoningEffort?: string
 }
 ```
 
@@ -393,8 +409,10 @@ without explicit user instruction. Summary:
 - `review.start` + **`userContent`**
 - `tier.call`, **`tier.request`** (`max_tokens`, `jsonObject`),
   **`tier.response`** (`text_head`, `text_tail`, `finish`)
-- `tier.result`, `tier.fail` (includes `cooldownMs` after mark)
-- `tier.cooldown` (set on operational fail: `untilMs`, `error`)
+- `tier.result`, `tier.fail` (`isTimeout`, `consecutiveTimeouts`,
+  `cooldownMs`; `0` = timeout strike 1 or 2)
+- `tier.cooldown` (HTTP/5xx/empty/parse/missing key on first fail;
+  timeout only after 3 consecutive: `untilMs`, `error`)
 - `tier.skip_cooldown` (later ask while cooling: `remainMs`, `lastError`)
 - `reply.approve` / `.ok` / `.fail`, `escalate`, `all_tiers_failed`
 - cache paths: `reply.cache*`
@@ -513,7 +531,9 @@ trial (sleep ~3s between calls).
 |----|-------|--------|
 | B | Ordinary bash (`ls`) | Primary (`ollama-gemma4-31b`) approve; dlog `tier.result decision=approve`; app.log `tier result` has model; TUI “approved by you” |
 | C1 | `sudo …` | Primary escalate; **no** next-tier `tier.call` after definitive escalate |
-| C2 | Force primary fail (bad/missing key / timeout) | `ollama-gemma4-31b` `tier.fail` + `tier.cooldown` → `groq-qwen36-27b` `tier.call` → result; next ask: `tier.skip_cooldown` for primary |
+| C2a | Force primary **HTTP/key** fail | `ollama-gemma4-31b` `tier.fail` + **immediate** `tier.cooldown` → `groq-qwen36-27b` `tier.call`; next ask: `tier.skip_cooldown` for primary |
+| C2b | Force primary **timeout** (once) | `tier.fail` `isTimeout=true` `cooldownMs=0` → next tier; **next ask still tries primary** (no `tier.skip_cooldown`) |
+| C2c | Three consecutive primary timeouts | third `tier.fail` applies `tier.cooldown`; later ask: `tier.skip_cooldown` |
 | D | Reach gateway | `model=poolside/laguna-s-2.1:free` |
 | E | mkfs / .env edit | escalate, never approve |
 | F | dlog shape | `review.start.userContent`; per tier `tier.request` then `tier.response`; those fields **absent** from opencode.log |
@@ -531,7 +551,9 @@ permission.asked (not in skip)
         ▼
   for tier in order (from agent-reviewer.json):
         │
-        ├─ HTTP/timeout/empty/unparseable ──► next tier
+        ├─ HTTP/empty/unparseable/missing key ──► cooldown + next tier
+        │
+        ├─ timeout (AbortError) ──► next tier; cooldown only if 3 consecutive
         │
         ├─ decision approve ──► reply once; STOP
         │
@@ -560,7 +582,8 @@ permission.asked (not in skip)
 |------|------|
 | `agent-reviewer.ts` | Implementation |
 | `tui/agent-reviewer-tui.tsx` | Reason overlay on escalate (native Permit/Reject) |
-| `scripts/install.sh` | Install/update into `~/.config/kilo` (**never** writes `agent-reviewer.json`) |
+| `scripts/install.sh` | Install/update plugin + TUI + example (**never** writes `agent-reviewer.json`; no markdown; checksum skip) |
+| `scripts/gate_suite_unified.py` | Optional harness against live JSON keys |
 | `README.md` | Human operator guide |
 | `AGENTS.md` | This file — agent constraints & APIs |
 
