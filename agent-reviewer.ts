@@ -27,7 +27,7 @@ import {
 } from "./lib/least-connections.ts";
 
 /** Semver; keep in sync with root `VERSION`. Not a named export (Kilo auto-scan). */
-const PLUGIN_VERSION = "0.3.1";
+const PLUGIN_VERSION = "0.3.2";
 
 // ---------------------------------------------------------------------------
 // File-based debug log (survives when client.app.log is silent / hanging).
@@ -509,7 +509,6 @@ PRINCIPLES
 - Chained commands (&&, ||, ;, &, |): escalate if ANY part is dangerous.
 - File written earlier then executed: the written content is part of the action.
 - Inline code (python -c, heredoc, node -e, bash -c): judge the PAYLOAD by all other rules as if it ran directly.
-- Obfuscation (base64|sh, eval $(curl), cannot parse payload): escalate.
 
 ESCALATE if the action:
 - destroys data/systems (rm -rf /, mkfs, dd, force-push, mass delete, cloud bucket recursive delete)
