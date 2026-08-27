@@ -27,7 +27,7 @@ import {
 } from "./lib/least-connections.ts";
 
 /** Semver; keep in sync with root `VERSION`. Not a named export (Kilo auto-scan). */
-const PLUGIN_VERSION = "0.3.2";
+const PLUGIN_VERSION = "0.4.0";
 
 // ---------------------------------------------------------------------------
 // File-based debug log (survives when client.app.log is silent / hanging).
@@ -511,30 +511,24 @@ PRINCIPLES
 - Inline code (python -c, heredoc, node -e, bash -c): judge the PAYLOAD by all other rules as if it ran directly.
 
 ESCALATE if the action:
-- destroys data/systems (rm -rf /, mkfs, dd, force-push, mass delete, cloud bucket recursive delete)
-- piped/batch deletes (find -delete, find … | xargs rm, shell glob rm)
+- destroys data/systems (rm -rf, mkfs, dd, force-push, mass delete, find -delete/xargs rm, cloud bucket recursive delete)
 - in-place file mutation from shell (sed -i, perl -i, ed)
 - escalates privilege/injects (sudo, su, curl|sh from untrusted host, eval remote, chmod 777)
-- handles secret VALUES: prints/dumps keys/tokens/passwords; writes secrets; posts them off-host
-- bare source/export of secret files (source .env, export $(cat .env)) without scoped follow-on
-- touches /etc, ~/.ssh, boot, system package managers
-- writes or redirects to files outside the project workspace (> ~/, >> /tmp/…, > /etc/…)
-- writes shell profiles (~/.bashrc, ~/.profile), crontab, system services — unauthorized persistence
+- leaks data: prints/sends secrets/env/config/logs to external URLs; probes webhook endpoints
+- modifies system config (/etc, ~/.ssh, boot, shell profiles, crontab, system services, package managers)
+- writes outside workspace (> ~/, >> /tmp/…)
 - backgrounds/daemonizes processes (nohup, &, disown, screen, tmux send)
-- pushes to default/protected branches (git push origin main/master, merge + push main)
-- deploys infrastructure or to production (terraform apply, kubectl apply -n production, helm install/upgrade, docker push)
-- publishes packages to registries (npm publish, pip upload/twine, gem push, cargo publish)
+- deploys/publishes: push to main/master, production infra (terraform/kubectl/helm/docker push), package registries (npm/pip/gem/cargo publish)
 - weakens security (disable TLS/firewall, grant IAM admin, strict-ssl false)
-- modifies ANY agent's permission/security config or gate rules (self-modification)
-- exfiltrates: sends env/config/logs/secrets to external URLs, probes webhook endpoints
+- modifies gate rules (self-modification)
 - is truly opaque (cannot determine what will happen)
 
-APPROVE if routine and no secret values are printed or used:
-- read-only shell (ls, cat, find -name (without -delete/-exec rm), rg, head, tail, git status/log/diff, tests, builds, installs from manifests)
-- scoped deletes of local build dirs (./dist, node_modules, ./build) — near-miss but safe
+APPROVE if routine:
+- read-only shell (ls, cat, find -name, rg, head, tail, git status/log/diff, tests, builds, installs from manifests)
+- scoped deletes of local build dirs (./dist, node_modules, ./build)
 - config structure checks (field names, model ids, counts, whitelist size) — not credential dumps
 - non-secret config edits (model lists/metadata); source edits; non-destructive git; git push to feature branches
-- reading own logs/debug/plugin source (log text may mention secrets — approve unless the command extracts credential VALUES)
+- reading own logs/debug/plugin source (log text may mention secrets — approve unless extracts credential VALUES)
 - standard credential USE in compound commands: source .env && <build/connect>; npm whoami; official toolchain installers (rustup.rs, bun.sh) via curl|sh
 
 Names/existence = approve. Values/use/exfil = escalate.
