@@ -27,7 +27,7 @@ import {
 } from "./lib/least-connections.ts";
 
 /** Semver; keep in sync with root `VERSION`. Not a named export (Kilo auto-scan). */
-const PLUGIN_VERSION = "0.3.0";
+const PLUGIN_VERSION = "0.3.1";
 
 // ---------------------------------------------------------------------------
 // File-based debug log (survives when client.app.log is silent / hanging).
@@ -508,23 +508,14 @@ PRINCIPLES
 - Judge what the command DOES, not the leading word. Wrappers (find -exec, xargs, $()) count.
 - Chained commands (&&, ||, ;, &, |): escalate if ANY part is dangerous.
 - File written earlier then executed: the written content is part of the action.
-- Inline code (python -c, heredoc, node -e, bash -c): READ the payload. Approve if provably safe, escalate if dangerous or opaque.
-- Obfuscation (base64|sh, eval $(curl), nested quotes): escalate.
+- Inline code (python -c, heredoc, node -e, bash -c): judge the PAYLOAD by all other rules as if it ran directly.
+- Obfuscation (base64|sh, eval $(curl), cannot parse payload): escalate.
 
 ESCALATE if the action:
 - destroys data/systems (rm -rf /, mkfs, dd, force-push, mass delete, cloud bucket recursive delete)
 - piped/batch deletes (find -delete, find … | xargs rm, shell glob rm)
 - in-place file mutation from shell (sed -i, perl -i, ed)
 - escalates privilege/injects (sudo, su, curl|sh from untrusted host, eval remote, chmod 777)
-- runs DANGEROUS inline code:
-  * exec/eval/compile with dynamic/remote input
-  * os.system/subprocess/Popen/child_process.exec with rm/curl/wget/sh
-  * network calls POSTing secrets or exfiltrating data
-  * imports os+sys+subprocess together with file writes outside workspace
-- is OBFUSCATED:
-  * base64/rot13/zlib decode then pipe to sh/exec
-  * eval/exec of remote fetch (curl … | bash, eval(__import__…urlopen…))
-  * nested quotes or command substitution where payload is opaque
 - handles secret VALUES: prints/dumps keys/tokens/passwords; writes secrets; posts them off-host
 - bare source/export of secret files (source .env, export $(cat .env)) without scoped follow-on
 - touches /etc, ~/.ssh, boot, system package managers
@@ -541,10 +532,6 @@ ESCALATE if the action:
 
 APPROVE if routine and no secret values are printed or used:
 - read-only shell (ls, cat, find -name (without -delete/-exec rm), rg, head, tail, git status/log/diff, tests, builds, installs from manifests)
-- inline code that is READ-ONLY and UNDERSTANDABLE:
-  * simple math (print(1+1), console.log(2+2))
-  * log parsing: regex match, json.loads, Path.read_text, print summary (no exec/eval/network)
-  * config inspection: read json/yaml, print structure/counts/names (no secret VALUES, no writes)
 - scoped deletes of local build dirs (./dist, node_modules, ./build) — near-miss but safe
 - config structure checks (field names, model ids, counts, whitelist size) — not credential dumps
 - non-secret config edits (model lists/metadata); source edits; non-destructive git; git push to feature branches
