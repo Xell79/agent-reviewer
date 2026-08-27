@@ -27,13 +27,13 @@ else
 fi
 
 # shellcheck disable=SC2059
-msg_ok()   { printf "${_c_green}✓${_c_reset} %s\n" "$*"; }
+msg_ok()   { printf "${_c_green}[ok]${_c_reset} %s\n" "$*"; }
 # shellcheck disable=SC2059
-msg_info() { printf "${_c_cyan}•${_c_reset} %s\n" "$*"; }
+msg_info() { printf "${_c_cyan}[..]${_c_reset} %s\n" "$*"; }
 # shellcheck disable=SC2059
-msg_warn() { printf "${_c_yellow}⚠${_c_reset} %s\n" "$*"; }
+msg_warn() { printf "${_c_yellow}[!!]${_c_reset} %s\n" "$*"; }
 # shellcheck disable=SC2059
-msg_err()  { printf "${_c_red}✗${_c_reset} %s\n" "$*" >&2; }
+msg_err()  { printf "${_c_red}[EE]${_c_reset} %s\n" "$*" >&2; }
 # shellcheck disable=SC2059
 msg_hdr()  { printf "\n${_c_bold}%s${_c_reset}\n" "$*"; }
 # shellcheck disable=SC2059
@@ -241,7 +241,7 @@ fetch_repo() {
 		msg_err "REFUSED: $ROOT exists and is not this repo checkout"
 		exit 1
 	fi
-	msg_info "cloning $REPO_URL → $ROOT"
+	msg_info "cloning $REPO_URL -> $ROOT"
 	run mkdir -p "$(dirname "$ROOT")"
 	run git clone --depth 1 "$REPO_URL" "$ROOT"
 }
@@ -293,7 +293,7 @@ report_version_drift() {
 	else
 		msg_info "version: repo ${repo}  dest ${dest_ver}"
 		# shellcheck disable=SC2059
-		printf "  ${_c_yellow}→ update available${_c_reset}: dest ${dest_ver} → repo ${repo}\n"
+		printf "  ${_c_yellow}-> update available${_c_reset}: dest ${dest_ver} -> repo ${repo}\n"
 	fi
 }
 
