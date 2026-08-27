@@ -9,13 +9,13 @@ set -euo pipefail
 
 # ── Colors (auto-detect terminal support) ──────────────────────────────
 if [[ -t 1 ]] && [[ "${TERM:-}" != "dumb" ]] && [[ -n "${TERM:-}" ]]; then
-	_c_red='\033[0;31m'    # errors
-	_c_yellow='\033[0;33m' # warnings, notes
-	_c_green='\033[0;32m'  # success
-	_c_cyan='\033[0;36m'   # info
-	_c_bold='\033[1m'      # headers
-	_c_dim='\033[2m'       # dry-run, paths
-	_c_reset='\033[0m'
+	_c_red=$'\033[0;31m'    # errors
+	_c_yellow=$'\033[0;33m' # warnings, notes
+	_c_green=$'\033[0;32m'  # success
+	_c_cyan=$'\033[0;36m'   # info
+	_c_bold=$'\033[1m'      # headers
+	_c_dim=$'\033[2m'       # dry-run, paths
+	_c_reset=$'\033[0m'
 else
 	_c_red=''
 	_c_yellow=''
