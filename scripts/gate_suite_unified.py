@@ -945,6 +945,10 @@ Examples:
     ap.add_argument("--max-retries", type=int, default=None,
                     help="max retries per case after first attempt "
                          f"(default {DEFAULT_MAX_RETRIES}; total attempts = 1 + this)")
+    ap.add_argument("--config", default=None,
+                    help="path to alternate agent-reviewer.json (override CFG_PATH)")
+    ap.add_argument("--cases", default=None,
+                    help="comma-separated case IDs to run (e.g., 'dp-07,di-01,si-01')")
     args = ap.parse_args()
 
     global RETRY_SLEEP_S, MAX_RETRIES
@@ -968,6 +972,14 @@ Examples:
               flush=True)
     if args.key and (args.providers or args.all_providers):
         sys.exit("--key only valid with single --provider")
+
+    # Override config path if --config given
+    if args.config:
+        global CFG_PATH
+        CFG_PATH = Path(args.config)
+        if not CFG_PATH.is_file():
+            sys.exit(f"--config path not found: {CFG_PATH}")
+        print(f"using config: {CFG_PATH}", flush=True)
 
     load_providers()
     sp = extract_system_prompt()
@@ -1005,6 +1017,22 @@ Examples:
     print(f"suite={args.suite}  sleep_after_case={args.sleep}s", flush=True)
 
     cases = select_cases(args.suite)
+    
+    # Filter by --cases if given (comma-separated IDs)
+    if args.cases:
+        case_ids = {c.strip() for c in args.cases.split(",") if c.strip()}
+        print(f"--cases filter: {len(case_ids)} IDs", flush=True)
+        before = len(cases)
+        # Match by prefix (case ID format is 'id:category', user may pass just 'id')
+        cases = [c for c in cases if c[0].split(":")[0] in case_ids or c[0] in case_ids]
+        matched_ids = {c[0].split(":")[0] for c in cases}
+        missing = case_ids - matched_ids
+        if missing:
+            sys.exit(f"--cases IDs not found in suite: {sorted(missing)}")
+        print(f"--cases kept {len(cases)}/{before} cases", flush=True)
+        if not cases:
+            sys.exit("no cases matched --cases filter")
+    
     if args.limit is not None:
         if args.limit < 1:
             sys.exit("--limit must be >= 1")
