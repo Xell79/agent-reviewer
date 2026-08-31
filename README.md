@@ -211,6 +211,65 @@ bun build plugin/agent-reviewer.ts --outfile=/tmp/ar-check.js --target=bun
 
 ---
 
+## Probe tiers (`check-agent-reviewer.py`)
+
+Local availability checker. Reads live `agent-reviewer.json` and pings
+every configured model (primary, then `fallbackModels`) with the same
+request shape as the plugin. Different `baseURL`s run in parallel;
+models that share a provider stay sequential (`--sleep` / retries).
+
+**Not** installed by `install.sh`. Needs a live JSON with keys
+(`chmod 600`); that file is gitignored and must never be committed.
+
+```bash
+# default config: ./agent-reviewer.json next to the script (gitignored)
+python3 check-agent-reviewer.py
+
+# canonical live path after install
+python3 check-agent-reviewer.py --config ~/.config/kilo/agent-reviewer.json
+
+# subset
+python3 check-agent-reviewer.py --only ollama-gemma4-31b,groq-qwen36-27b
+```
+
+On a TTY the full probe list is drawn first and rewritten in place.
+`--no-live` / `--no-color` for logs. Ctrl+C exits 130 (no traceback).
+
+| | |
+|---|---|
+| Exit `0` | every target OK |
+| Exit `1` | at least one FAIL or SKIP (missing key) |
+| Exit `2` | config error / no tiers |
+| Exit `130` | interrupted |
+
+The checker sends `Authorization: Bearer …` but does **not** print
+keys. FAIL notes may include a short HTTP error body from the
+provider (truncated). Do not paste those logs into issues if they
+look sensitive.
+
+<details>
+<summary>Flags and request parity</summary>
+
+<br>
+
+| Flag | Default | |
+|------|---------|---|
+| `--config` | `./agent-reviewer.json` | same schema as the plugin |
+| `--only` | all | comma-separated tier names |
+| `--sleep` | `12` | seconds between checks of the same `baseURL` |
+| `--retries` | `2` | extra attempts on network / 429 / 5xx |
+| `--retry-sleep` | `60` | seconds before a retry |
+
+Parity with `callReviewer`: OpenAI `POST {base}/chat/completions`,
+Cohere `apiFormat: cohere-v2` → `POST {base}/chat`, Groq
+`max_completion_tokens`, Nemotron `/no_think`, `jsonObject` →
+`response_format: json_object`. Key order: `tier.apiKey`, then
+`env(tier.apiKeyEnv)`.
+
+</details>
+
+---
+
 ## Related
 
 | Path | Role |
@@ -218,5 +277,6 @@ bun build plugin/agent-reviewer.ts --outfile=/tmp/ar-check.js --target=bun
 | `VERSION` | Semver (source of truth; not copied to dest) |
 | `CHANGELOG.md` | Keep a Changelog; GitHub Release notes |
 | `scripts/install.sh` | Install/update (**never** writes live JSON) |
+| `check-agent-reviewer.py` | Probe every configured model (local; not installed) |
 | `AGENTS.md` | Hooks, schemas, edit constraints |
 | `LICENSE` | MIT |

@@ -11,8 +11,10 @@ venv/
 .coverage.*
 htmlcov/
 
-# Secrets — never commit live keys
+# Secrets — never commit live keys (or backups of the live file)
 agent-reviewer.json
+agent-reviewer.json.*
+!agent-reviewer.json.example
 
 # Local dumps / plans (not public)
 docs/

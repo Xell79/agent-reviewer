@@ -1,0 +1,2 @@
+# rumdl config — relaxed for GitHub Markdown with collapsible sections
+disable = ["MD013", "MD033"]
