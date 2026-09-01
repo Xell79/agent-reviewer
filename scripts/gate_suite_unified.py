@@ -28,8 +28,8 @@ Rate limits:
   Applies uniformly to all models. Override: --sleep 0 (no delay) or --sleep N.
 
 Key reading from ~/.config/kilo/agent-reviewer.json unless --key given (single target only).
-Output: /tmp/gate_unified_<suite>_<timestamp>.json (multi) or
-        /tmp/gate_unified_<provider>_<model>_<suite>.json (single)
+Output: /tmp/gate_unified_multi_<names>_<suite>_<timestamp>.json (multi) or
+        /tmp/gate_unified_<provider>_<model>_<suite>_<timestamp>.json (single)
 """
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ from typing import Any
 # Config / keys
 # ---------------------------------------------------------------------------
 
-CFG_PATH = Path(os.environ.get("AGENT_REVIEWER_CONFIG",
+_cfg_path = Path(os.environ.get("AGENT_REVIEWER_CONFIG",
                                 os.path.expanduser("~/.config/kilo/agent-reviewer.json")))
 SCRIPT_DIR = Path(__file__).resolve().parent
 HARD10_GOLD = SCRIPT_DIR / "gate_hard10_gold.json"
@@ -63,15 +63,15 @@ DEFAULT_CASE_SLEEP_S = 12.0
 # Pause before retry after timeout/HTTP/network errors (override with --retry-sleep).
 DEFAULT_RETRY_SLEEP_S = 12.0
 # Max retries per case after first attempt (override with --max-retries).
-# Total attempts = 1 + MAX_RETRIES.
+# Total attempts = 1 + _max_retries.
 DEFAULT_MAX_RETRIES = 3
 # Runtime overrides set from CLI in main().
-RETRY_SLEEP_S = DEFAULT_RETRY_SLEEP_S
-MAX_RETRIES = DEFAULT_MAX_RETRIES
+_retry_sleep_s = DEFAULT_RETRY_SLEEP_S
+_max_retries = DEFAULT_MAX_RETRIES
 
-PROVIDERS: dict[str, dict] = {}  # all tier defs (name → config)
-ORDER: list[str] = []  # enabled chain from config.order (empty = all defs)
-PROVIDER_INDEX: list[str] = []  # 1-based numbered list of all defined providers
+_providers: dict[str, dict[str, Any]] = {}  # all tier defs (name → config)
+_order: list[str] = []  # enabled chain from config.order (empty = all defs)
+_provider_index: list[str] = []  # 1-based numbered list of all defined providers
 
 
 def load_providers() -> None:
@@ -83,12 +83,11 @@ def load_providers() -> None:
     Legacy:
       tiers: [ { name, ..., disabled? }, ... ]
     """
-    global ORDER, PROVIDER_INDEX
-    raw = json.loads(CFG_PATH.read_text())
+    raw = json.loads(_cfg_path.read_text())
     tiers_raw = raw.get("tiers", {})
     order = raw.get("order")
 
-    defs: dict[str, dict] = {}
+    defs: dict[str, dict[str, Any]] = {}
     if isinstance(tiers_raw, dict):
         for name, t in tiers_raw.items():
             if not isinstance(t, dict):
@@ -111,34 +110,34 @@ def load_providers() -> None:
         if not isinstance(order, list) or not order:
             order = legacy_order
 
-    PROVIDERS.clear()
-    PROVIDERS.update(defs)
+    _providers.clear()
+    _providers.update(defs)
 
     if isinstance(order, list) and order:
-        ORDER = [n for n in order if n in defs]
+        _order[:] = [n for n in order if n in defs]
     else:
-        ORDER = list(defs.keys())
+        _order[:] = list(defs.keys())
 
     # Build stable 1-based provider list: tiers in active order first, then remaining defined tiers
     seen: set[str] = set()
-    PROVIDER_INDEX = []
-    for name in ORDER:
-        if name in PROVIDERS and name not in seen:
-            PROVIDER_INDEX.append(name)
+    _provider_index.clear()
+    for name in _order:
+        if name in _providers and name not in seen:
+            _provider_index.append(name)
             seen.add(name)
-    for name in PROVIDERS:
+    for name in _providers:
         if name not in seen:
-            PROVIDER_INDEX.append(name)
+            _provider_index.append(name)
             seen.add(name)
 
 
 def print_providers_list() -> None:
     """Print numbered list of all available providers from config."""
-    print(f"\nAvailable tiers in {CFG_PATH}:")
-    for idx, name in enumerate(PROVIDER_INDEX, start=1):
-        t = PROVIDERS[name]
+    print(f"\nAvailable tiers in {_cfg_path}:")
+    for idx, name in enumerate(_provider_index, start=1):
+        t = _providers[name]
         model = t.get("model", "unknown")
-        in_order = f"(active order #{ORDER.index(name) + 1})" if name in ORDER else "(research / not in active order)"
+        in_order = f"(active order #{_order.index(name) + 1})" if name in _order else "(research / not in active order)"
         print(f"  [{idx:2d}] {name:<26} [model: {model}] {in_order}")
     print()
 
@@ -159,29 +158,29 @@ def resolve_provider_names(raw_spec: str) -> list[str]:
         m_range = re.match(r"^(\d+)\s*-\s*(\d+)$", tok)
         if m_range:
             start, end = int(m_range.group(1)), int(m_range.group(2))
-            if start < 1 or end > len(PROVIDER_INDEX) or start > end:
+            if start < 1 or end > len(_provider_index) or start > end:
                 sys.exit(
-                    f"invalid provider range '{tok}'. Valid range: 1..{len(PROVIDER_INDEX)}. "
+                    f"invalid provider range '{tok}'. Valid range: 1..{len(_provider_index)}. "
                     f"Use --list to view all providers."
                 )
             for i in range(start, end + 1):
-                add_name(PROVIDER_INDEX[i - 1])
+                add_name(_provider_index[i - 1])
             continue
 
         # Check single integer: e.g. "2"
         if tok.isdigit():
             idx = int(tok)
-            if 1 <= idx <= len(PROVIDER_INDEX):
-                add_name(PROVIDER_INDEX[idx - 1])
+            if 1 <= idx <= len(_provider_index):
+                add_name(_provider_index[idx - 1])
                 continue
             else:
                 sys.exit(
-                    f"invalid provider number '{tok}'. Valid numbers: 1..{len(PROVIDER_INDEX)}. "
+                    f"invalid provider number '{tok}'. Valid numbers: 1..{len(_provider_index)}. "
                     f"Use --list to view all providers."
                 )
 
         # Check name
-        if tok in PROVIDERS:
+        if tok in _providers:
             add_name(tok)
         else:
             sys.exit(
@@ -194,9 +193,9 @@ def resolve_provider_names(raw_spec: str) -> list[str]:
 def get_key(provider: str, explicit: str | None) -> str:
     if explicit:
         return explicit
-    tier = PROVIDERS.get(provider)
+    tier = _providers.get(provider)
     if not tier:
-        sys.exit(f"unknown provider '{provider}'; known: {sorted(PROVIDERS)}")
+        sys.exit(f"unknown provider '{provider}'; known: {sorted(_providers)}")
     k = tier.get("apiKey") or os.environ.get(tier.get("apiKeyEnv", ""), "")
     if not k:
         sys.exit(f"no key for provider '{provider}' (apiKey / {tier.get('apiKeyEnv')})")
@@ -209,16 +208,16 @@ def get_key(provider: str, explicit: str | None) -> str:
 
 def extract_system_prompt() -> str:
     """Read systemPrompt strictly from agent-reviewer.json. Exit if missing or empty."""
-    if not CFG_PATH.is_file():
-        sys.exit(f"ERROR: config file not found at {CFG_PATH}")
+    if not _cfg_path.is_file():
+        sys.exit(f"ERROR: config file not found at {_cfg_path}")
     try:
-        raw = json.loads(CFG_PATH.read_text())
+        raw = json.loads(_cfg_path.read_text())
     except Exception as e:
-        sys.exit(f"ERROR: failed to parse config {CFG_PATH}: {e}")
+        sys.exit(f"ERROR: failed to parse config {_cfg_path}: {e}")
     sp = raw.get("systemPrompt")
     if not isinstance(sp, str) or not sp.strip():
         sys.exit(
-            f"ERROR: 'systemPrompt' is missing or empty in {CFG_PATH}.\n"
+            f"ERROR: 'systemPrompt' is missing or empty in {_cfg_path}.\n"
             "The safety gate requires a non-empty systemPrompt in agent-reviewer.json."
         )
     return sp.strip()
@@ -306,7 +305,7 @@ def parse(text: str):
     return None, None, "none"
 
 
-def extract_text(data: dict) -> str:
+def extract_text(data: dict[str, Any]) -> str:
     """OpenAI chat/completions, Anthropic /messages, OR Cohere v2 /chat response → assistant text."""
     # Anthropic native: data["content"] list
     ac = data.get("content")
@@ -388,18 +387,18 @@ def is_nemotron_model(model: str) -> bool:
     return "nemotron" in (model or "").lower()
 
 
-def nemotron_disable_thinking_kwargs(model: str) -> dict | None:
+def nemotron_disable_thinking_kwargs(model: str) -> dict[str, Any] | None:
     """Nemotron 3 Super / 3.5 Lightning ignore /no_think; official off-switch."""
     if not is_nemotron_model(model):
         return None
     return {"enable_thinking": False}
 
 
-def messages_for_model(model: str, msgs: list[dict]) -> list[dict]:
+def messages_for_model(model: str, msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Append /no_think to system message for Nemotron (disable CoT). Idempotent."""
     if not is_nemotron_model(model):
         return msgs
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     for m in msgs:
         if m.get("role") != "system":
             out.append(m)
@@ -416,14 +415,14 @@ def messages_for_model(model: str, msgs: list[dict]) -> list[dict]:
 # API call
 # ---------------------------------------------------------------------------
 
-def call_model(target: ModelTarget, msgs: list[dict], retries: int | None = None) -> dict:
+def call_model(target: ModelTarget, msgs: list[dict[str, Any]], retries: int | None = None) -> dict[str, Any]:
     """Call one model. Supports OpenAI-compatible, Anthropic, and Cohere v2.
 
     retries: max *retries* after the first attempt (not total attempts).
-    Total attempts = 1 + retries. Default from MAX_RETRIES (CLI --max-retries).
+    Total attempts = 1 + retries. Default from _max_retries (CLI --max-retries).
     """
     if retries is None:
-        retries = MAX_RETRIES
+        retries = _max_retries
     max_attempts = 1 + max(0, int(retries))
 
     is_anthropic = target.api_format == "anthropic"
@@ -504,7 +503,7 @@ def call_model(target: ModelTarget, msgs: list[dict], retries: int | None = None
     if target.headers:
         headers.update(target.headers)
 
-    last: dict | None = None
+    last: dict[str, Any] | None = None
     for attempt in range(max_attempts):
         req = urllib.request.Request(
             url,
@@ -555,7 +554,7 @@ def call_model(target: ModelTarget, msgs: list[dict], retries: int | None = None
                 or (isinstance(finish, str) and finish.lower() == "length")
             )
             if soft_fail and attempt < max_attempts - 1:
-                wait = RETRY_SLEEP_S
+                wait = _retry_sleep_s
                 print(
                     f"    [{target.label}] retry {wait:g}s "
                     f"(attempt {attempt + 1}/{max_attempts} "
@@ -574,7 +573,7 @@ def call_model(target: ModelTarget, msgs: list[dict], retries: int | None = None
             }
             # Retry on rate-limit / overload / 502 gateway flakes.
             if e.code in (429, 502, 503, 529) and attempt < max_attempts - 1:
-                wait = RETRY_SLEEP_S
+                wait = _retry_sleep_s
                 print(
                     f"    [{target.label}] retry {wait:g}s "
                     f"(attempt {attempt + 1}/{max_attempts} {e.code}) "
@@ -592,7 +591,7 @@ def call_model(target: ModelTarget, msgs: list[dict], retries: int | None = None
             }
             # Timeouts / network: same retry budget as other errors (max-retries).
             if attempt < max_attempts - 1:
-                wait = RETRY_SLEEP_S
+                wait = _retry_sleep_s
                 print(
                     f"    [{target.label}] retry {wait:g}s "
                     f"(attempt {attempt + 1}/{max_attempts} {err_s[:100]})",
@@ -604,7 +603,7 @@ def call_model(target: ModelTarget, msgs: list[dict], retries: int | None = None
     return last or {"error": "unknown", "ms": 0}
 
 
-def result_entry(label: str, gold: str, r: dict) -> dict:
+def result_entry(label: str, gold: str, r: dict[str, Any]) -> dict[str, Any]:
     if "error" in r and r.get("decision") is None and not r.get("method"):
         decision = "error"
         reason = r["error"]
@@ -633,7 +632,7 @@ def result_entry(label: str, gold: str, r: dict) -> dict:
     }
 
 
-def status_tag(entry: dict) -> str:
+def status_tag(entry: dict[str, Any]) -> str:
     if entry.get("error") and entry.get("decision") == "error":
         return "ERR"
     if entry["match"]:
@@ -645,7 +644,7 @@ def status_tag(entry: dict) -> str:
     return "MIS"
 
 
-def score_block(results: list[dict]) -> dict:
+def score_block(results: list[dict[str, Any]]) -> dict[str, Any]:
     total = len(results)
     correct = sum(1 for r in results if r["match"])
     fa_n = sum(1 for r in results if r["fa"])
@@ -683,7 +682,7 @@ def score_block(results: list[dict]) -> dict:
     }
 
 
-def print_score(prefix: str, s: dict) -> None:
+def print_score(prefix: str, s: dict[str, Any]) -> None:
     print(
         f"{prefix}SCORE {s['correct']}/{s['total']}  FA={s['fa']}  FE={s['fe']}  "
         f"ERR={s['errors']}  avg={s['avg_ms']}ms  JSON={s['json']}  "
@@ -791,7 +790,7 @@ def run_multi(
     system_prompt: str,
     cases: list[tuple[str, str, str]],
     suite_name: str,
-) -> dict:
+) -> dict[str, Any]:
     """
     For each case:
       1. Fire concurrent requests to ALL targets
@@ -821,8 +820,8 @@ def run_multi(
     print(f"{'=' * 78}", flush=True)
 
     # per-model ordered results
-    by_model: dict[str, list[dict]] = {t.label: [] for t in targets}
-    case_rows: list[dict] = []
+    by_model: dict[str, list[dict[str, Any]]] = {t.label: [] for t in targets}
+    case_rows: list[dict[str, Any]] = []
 
     # Thread pool sized to number of models (one worker per model per case)
     with ThreadPoolExecutor(max_workers=max(1, n_models), thread_name_prefix="gate") as pool:
@@ -839,7 +838,7 @@ def run_multi(
             }
 
             # --- barrier: collect every future before next case ---
-            raw_by_label: dict[str, dict] = {}
+            raw_by_label: dict[str, dict[str, Any]] = {}
             for fut in as_completed(futures):
                 t = futures[fut]
                 try:
@@ -853,7 +852,7 @@ def run_multi(
                 if t.label not in raw_by_label:
                     raw_by_label[t.label] = {"error": "missing future result", "ms": 0}
 
-            case_by_model: dict[str, dict] = {}
+            case_by_model: dict[str, dict[str, Any]] = {}
             for t in targets:
                 entry = result_entry(label, gold, raw_by_label[t.label])
                 by_model[t.label].append(entry)
@@ -882,7 +881,7 @@ def run_multi(
                 time.sleep(sleep_s)
 
     # --- scoreboard ---
-    scores: dict[str, dict] = {}
+    scores: dict[str, dict[str, Any]] = {}
     print(f"\n{'=' * 78}", flush=True)
     print("SCOREBOARD", flush=True)
     print(f"{'=' * 78}", flush=True)
@@ -931,7 +930,7 @@ def run_single(
     system_prompt: str,
     cases: list[tuple[str, str, str]],
     suite_name: str,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Single-model sequential path (same barrier semantics with n=1)."""
     out = run_multi([target], system_prompt, cases, suite_name)
     return out["by_model"][target.label]
@@ -950,9 +949,9 @@ def build_target(
     reasoning_effort: str | None,
     key_override: str | None,
 ) -> ModelTarget:
-    tier = PROVIDERS.get(provider)
+    tier = _providers.get(provider)
     if not tier:
-        sys.exit(f"unknown provider '{provider}'; known: {sorted(PROVIDERS)}")
+        sys.exit(f"unknown provider '{provider}'; known: {sorted(_providers)}")
     base_url = tier.get("baseURL") or ""
     if not base_url:
         sys.exit(f"no baseURL for provider '{provider}'")
@@ -1054,18 +1053,18 @@ Examples:
     ap.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES,
                     help="max retries per case after first attempt (total attempts = 1 + this)")
     ap.add_argument("--config", default=None,
-                    help="path to alternate agent-reviewer.json (override CFG_PATH)")
+                    help="path to alternate agent-reviewer.json (override default config path)")
     ap.add_argument("--cases", default=None,
                     help="comma-separated case IDs to run (e.g., 'dp-07,di-01,si-01')")
     args = ap.parse_args()
 
     # Override config path if --config given
     if args.config:
-        global CFG_PATH
-        CFG_PATH = Path(args.config)
-        if not CFG_PATH.is_file():
-            sys.exit(f"--config path not found: {CFG_PATH}")
-        print(f"using config: {CFG_PATH}", flush=True)
+        global _cfg_path
+        _cfg_path = Path(args.config)
+        if not _cfg_path.is_file():
+            sys.exit(f"--config path not found: {_cfg_path}")
+        print(f"using config: {_cfg_path}", flush=True)
 
     load_providers()
 
@@ -1076,15 +1075,15 @@ Examples:
     if not args.providers and not args.all_providers:
         ap.error("one of the arguments --providers, --all-providers, or --list is required")
 
-    global RETRY_SLEEP_S, MAX_RETRIES
+    global _retry_sleep_s, _max_retries
     if args.retry_sleep < 0:
         sys.exit("--retry-sleep must be >= 0")
-    RETRY_SLEEP_S = float(args.retry_sleep)
+    _retry_sleep_s = float(args.retry_sleep)
     if args.max_retries < 0:
         sys.exit("--max-retries must be >= 0")
-    MAX_RETRIES = int(args.max_retries)
-    print(f"retry: sleep={RETRY_SLEEP_S:g}s max_retries={MAX_RETRIES} "
-          f"(max attempts/case={1 + MAX_RETRIES})", flush=True)
+    _max_retries = int(args.max_retries)
+    print(f"retry: sleep={_retry_sleep_s:g}s max_retries={_max_retries} "
+          f"(max attempts/case={1 + _max_retries})", flush=True)
 
     sp = extract_system_prompt()
     print(f"SYSTEM_PROMPT: {len(sp)} chars", flush=True)
@@ -1094,7 +1093,7 @@ Examples:
         names = resolve_provider_names(args.providers)
     else:
         # --all-providers: only tiers listed in config.order (enabled chain)
-        names = list(ORDER) if ORDER else list(PROVIDERS.keys())
+        names = list(_order) if _order else list(_providers.keys())
         if args.exclude:
             skip_names = set(resolve_provider_names(args.exclude))
             names = [n for n in names if n not in skip_names]
@@ -1177,7 +1176,7 @@ Examples:
     if len(targets) == 1:
         t = targets[0]
         safe = t.model.replace("/", "-").replace(":", "-")
-        out = Path(f"/tmp/gate_unified_{t.name}_{safe}_{args.suite}.json")
+        out = Path(f"/tmp/gate_unified_{t.name}_{safe}_{args.suite}_{ts}.json")
         # keep single-model flat list for backward compat
         out.write_text(json.dumps(payload["by_model"][t.label], indent=2))
     else:

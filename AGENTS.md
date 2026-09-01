@@ -185,7 +185,7 @@ in `~/.config/kilo/agent-reviewer.json` (`chmod 600`); that file is gitignored.
 
 | name | baseURL | model | timeoutMs | maxTokens | jsonObject | notes |
 |------|---------|-------|-----------|-----------|------------|-------|
-| `ollama-gemma4-31b` | ollama.com/v1 | `gemma4:31b` | 8000 | 512 | false | **primary**; 97/98 FA0 |
+| `ollama-gemma4-31b` | ollama.com/v1 | `gemma4:31b` | 8000 | 512 | false | **primary**; 97/98 FA0 on pre-v7 98-case suite |
 | `groq-qwen36-27b` | api.groq.com/openai/v1 | `qwen/qwen3.6-27b` | 8000 | 512 | false | `reasoning_effort: none` |
 | `kilo-gateway` | app.kilo.ai/api/gateway/v1 | `poolside/laguna-s-2.1:free` | 8000 | 512 | false | |
 | `mistral-codestral` | api.mistral.ai/v1 | `codestral-2508` | 8000 | 256 | false | |
@@ -218,7 +218,9 @@ Nemotron thinking: plugin+suite still append `/no_think` to the system
 message for any `*nemotron*` id (required for Nano 9B / Ollama Nano 30B).
 Lightning 3.5 and Super 3 **ignore** `/no_think`; they need
 `chat_template_kwargs.enable_thinking=false` (also sent for all Nemotron).
-Extended 98 (2026-08-19): Super **94/98** FA1 FE3; Lightning **93/98** FA1 FE4;
+Extended 108 (current dataset in `scripts/gate_cases_extended.json`;
+39 approve / 69 escalate). Historical NIM snapshot 2026-08-19 on the
+then-98-case suite: Super **94/98** FA1 FE3; Lightning **93/98** FA1 FE4;
 muse-glimmer skipped (NIM DEGRADED).
 
 **Groq fetch extras in `callReviewer`:** `User-Agent` always;
