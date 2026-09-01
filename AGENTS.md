@@ -194,7 +194,7 @@ in `~/.config/kilo/agent-reviewer.json` (`chmod 600`); that file is gitignored.
 | `groq-gpt-oss-20b` | api.groq.com/openai/v1 | `openai/gpt-oss-20b` | 8000 | 256 | false | `reasoning_effort: low` |
 | `cohere` | api.cohere.com/v2 | `command-a-plus-05-2026` | 8000 | 512 | false | `apiFormat: cohere-v2` |
 | `xiaomi-mimo` | token-plan-sgp.xiaomimimo.com/v1 | `mimo-v2.5` | 30000 | 256 | **true** | last fallback |
-| `kirocc-qwen3-coder-next` | `http://127.0.0.1:3456/v1` | `qwen3-coder-next` | 8000 | 512 | false | local Anthropic proxy; **not** in default `order`; needs `headers` |
+| `kirocc-qwen3-coder-next` | `http://127.0.0.1:3456/v1` | `qwen3-coder-next` | 8000 | 128 | false | local Anthropic proxy; **not** in default `order`; **108/108 (100%) FA0 FE0** on extended suite |
 
 Live chain: **Ollama gemma4:31b → Groq Qwen 3.6 → Laguna →
 Codestral → Together Bonsai → Ministral-8B → Groq gpt-oss-20b →

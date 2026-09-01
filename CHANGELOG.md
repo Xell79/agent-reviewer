@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-09-01
+
+### Fixed
+
+- **Python typing & constant refactor in benchmark harness (`gate_suite_unified.py`)**:
+  - Renamed mutable module state variables (`_providers`, `_order`, `_provider_index`, `_cfg_path`, `_retry_sleep_s`, `_max_retries`) to lowercase, resolving `pyright`/`mypy` warnings about constant reassignments.
+  - Parameterized generic `dict` annotations to `dict[str, Any]` and `list[dict[str, Any]]` across all helper functions and data structures.
+- **Timestamped single-model report files**: Single-model output files in `gate_suite_unified.py` now include a second-precision timestamp (`/tmp/gate_unified_<provider>_<model>_<suite>_<timestamp>.json`), matching multi-model output behavior and preventing accidental file overwrites on repeated runs.
+
+### Documentation
+
+- **Updated extended suite metrics in `AGENTS.md`**: Clarified the extended test suite size (108 cases: 39 approve / 69 escalate) and documented historical baseline scores.
+
 ## [0.5.0] - 2026-09-01
 
 ### Added
@@ -175,6 +188,8 @@ Smoke test: gemma4:31b 3/3 on obfuscation (dp-07 `base64|sh`, dp-08 `curl|base64
 - systemPrompt v6: form-based inline escalate (`runs arbitrary inline code`)
 - VERSION / PLUGIN_VERSION sync, `gh release create` with CHANGELOG notes
 
+[0.5.1]: https://github.com/Xell79/agent-reviewer/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/Xell79/agent-reviewer/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Xell79/agent-reviewer/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/Xell79/agent-reviewer/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Xell79/agent-reviewer/compare/v0.3.0...v0.3.1

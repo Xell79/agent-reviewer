@@ -27,7 +27,7 @@ import {
 } from "./lib/least-connections.ts";
 
 /** Semver; keep in sync with root `VERSION`. Not a named export (Kilo auto-scan). */
-const PLUGIN_VERSION = "0.5.0";
+const PLUGIN_VERSION = "0.5.1";
 
 // ---------------------------------------------------------------------------
 // File-based debug log (survives when client.app.log is silent / hanging).
