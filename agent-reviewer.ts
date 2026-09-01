@@ -299,6 +299,12 @@ type TierConfig = {
 	 * Config key may be `reasoningEffort` or `reasoning_effort`.
 	 */
 	reasoningEffort?: string;
+	/**
+	 * Extra HTTP headers merged after the plugin defaults
+	 * (Content-Type, Authorization, User-Agent, Cohere Accept).
+	 * On a colliding key, the tier value wins.
+	 */
+	headers?: Record<string, string>;
 };
 
 /** One enabled chain entry is just a name into `tiers` map. */
@@ -579,13 +585,28 @@ function normalizeTier(raw: unknown, forcedName?: string): TierConfig | null {
 					: "";
 		if (re.trim().length > 0) out.reasoningEffort = re.trim();
 	}
-	if (Array.isArray(t.fallbackModels)) {
-		const fb = t.fallbackModels
-			.filter((m): m is string => typeof m === "string" && m.length > 0)
-			.filter((m) => m !== out.model);
-		if (fb.length) out.fallbackModels = fb;
-	}
-	return out;
+		if (Array.isArray(t.fallbackModels)) {
+			const fb = t.fallbackModels
+				.filter((m): m is string => typeof m === "string" && m.length > 0)
+				.filter((m) => m !== out.model);
+			if (fb.length) out.fallbackModels = fb;
+		}
+		if (
+			typeof t.headers === "object" &&
+			t.headers !== null &&
+			!Array.isArray(t.headers)
+		) {
+			const h: Record<string, string> = {};
+			for (const [k, v] of Object.entries(t.headers as Record<string, unknown>)) {
+				if (typeof k === "string" && typeof v === "string") {
+					const key = k.trim();
+					const val = v.trim();
+					if (key && val) h[key] = val;
+				}
+			}
+			if (Object.keys(h).length > 0) out.headers = h;
+		}
+		return out;
 }
 
 /**
@@ -1174,6 +1195,7 @@ async function callReviewerOnce(
 		jsonObject: tier.jsonObject === true,
 		noThink: isNemotronModel(model),
 		enableThinking: thinkKw ? false : undefined,
+		headerKeys: tier.headers ? Object.keys(tier.headers) : undefined,
 	});
 
 	try {
@@ -1186,6 +1208,7 @@ async function callReviewerOnce(
 				"User-Agent": "agent-reviewer/1.0 (+kilo-plugin)",
 				// Cohere v2 native API requires explicit Accept header.
 				...(isCohereV2 ? { Accept: "application/json" } : {}),
+				...(tier.headers || {}),
 			},
 			body: JSON.stringify(body),
 			signal: controller.signal,

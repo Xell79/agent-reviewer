@@ -17,6 +17,7 @@ The request format replicates plugin/agent-reviewer.ts exactly:
   - nemotron models: "/no_think" appended to the system message
   - jsonObject tiers: response_format {"type": "json_object"}
   - apiKey resolution: tier.apiKey first, then env(tier.apiKeyEnv)
+  - custom headers: tier.headers merged after standard headers (tier wins)
 
 On a TTY the full probe list is drawn first (check order, top → bottom)
 and rewritten in place as each target is checked. Ctrl+C is a clean exit.
@@ -231,10 +232,34 @@ def build_probe_messages(model: str, json_mode: bool) -> list[dict[str, str]]:
     ]
 
 
-def build_request_body(
-    tier_name: str, tier_cfg: dict[str, Any], model: str, messages: list[dict[str, str]]
-) -> tuple[str, dict[str, Any]]:
-    """Return (url, body) replicating plugin callReviewerOnce()."""
+def merge_headers(api_key: str, tier_cfg: dict[str, Any]) -> dict[str, str]:
+    """Standard plugin headers, then tier.headers (tier value wins on collision)."""
+    is_cohere_v2 = tier_cfg.get("apiFormat") == "cohere-v2"
+    headers: dict[str, str] = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+        "User-Agent": "agent-reviewer-check/1.0",
+    }
+    if is_cohere_v2:
+        headers["Accept"] = "application/json"
+    extra = tier_cfg.get("headers")
+    if isinstance(extra, dict):
+        for k, v in extra.items():
+            if isinstance(k, str) and isinstance(v, str):
+                key, val = k.strip(), v.strip()
+                if key and val:
+                    headers[key] = val
+    return headers
+
+
+def build_request_parts(
+    tier_name: str,
+    tier_cfg: dict[str, Any],
+    model: str,
+    messages: list[dict[str, str]],
+    api_key: str,
+) -> tuple[str, dict[str, Any], dict[str, str]]:
+    """Return (url, body, headers) replicating plugin callReviewerOnce()."""
     base = str(tier_cfg.get("baseURL", "")).rstrip("/")
     is_cohere_v2 = tier_cfg.get("apiFormat") == "cohere-v2"
     url = f"{base}/chat" if is_cohere_v2 else f"{base}/chat/completions"
@@ -268,7 +293,7 @@ def build_request_body(
     if not is_cohere_v2 and isinstance(reasoning_effort, str) and reasoning_effort:
         body["reasoning_effort"] = reasoning_effort
 
-    return url, body
+    return url, body, merge_headers(api_key, tier_cfg)
 
 
 def extract_reply(payload: dict[str, Any]) -> tuple[str, str]:
@@ -297,16 +322,12 @@ def extract_reply(payload: dict[str, Any]) -> tuple[str, str]:
 
 
 def http_post_json(
-    url: str, api_key: str, body: dict[str, Any], timeout_s: float
+    url: str, body: dict[str, Any], headers: dict[str, str], timeout_s: float
 ) -> tuple[int, dict[str, Any] | str]:
     req = urllib.request.Request(
         url,
         data=json.dumps(body).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-            "User-Agent": "agent-reviewer-check/1.0",
-        },
+        headers=headers,
         method="POST",
     )
     try:
@@ -380,8 +401,12 @@ async def probe_model(
 
     timeout_ms = tier_cfg.get("timeoutMs") or 8000
     json_mode = tier_cfg.get("jsonObject") is True
-    url, body = build_request_body(
-        tier_name, tier_cfg, model, build_probe_messages(model, json_mode)
+    url, body, headers = build_request_parts(
+        tier_name,
+        tier_cfg,
+        model,
+        build_probe_messages(model, json_mode),
+        api_key,
     )
 
     async def progress(
@@ -396,7 +421,7 @@ async def probe_model(
         start = time.monotonic()
         try:
             code, payload = await asyncio.to_thread(
-                http_post_json, url, api_key, body, timeout_ms / 1000.0
+                http_post_json, url, body, headers, timeout_ms / 1000.0
             )
         except _HttpError as e:
             res.status = FAIL

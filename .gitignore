@@ -20,6 +20,7 @@ agent-reviewer.json.*
 docs/
 results/
 /tmp/
+systemPrompt*
 
 # Editor / agent
 .kilo/

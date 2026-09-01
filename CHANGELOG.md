@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-27
+
+### Changed
+
+**systemPrompt v9-optimized** — merged duplicate/overlapping escalate rules, removed redundancy.
+
+- **v8.1 problem:** 17 escalate bullets with semantic overlaps (deletion, system persistence, secrets/exfil, deploy/publish categories split)
+- **v9 optimization:** merged overlapping bullets, removed redundancy
+- **Merges:**
+  - **Deletion:** `destroys data/systems` + `piped/batch deletes` → combined (both about destructive deletion)
+  - **System persistence:** `touches /etc, ~/.ssh, boot` + `writes shell profiles` → `modifies system config`
+  - **Data leakage:** `handles secret VALUES` + `exfiltrates` → `leaks data`; removed `bare source/export .env` (covered by leaks)
+  - **Deploy/publish:** `pushes to default branches` + `deploys infra` + `publishes packages` → `deploys/publishes`
+  - **APPROVE header:** removed "and no secret values are printed or used" (footer `Values/use/exfil = escalate` covers it)
+  - **Gate rules:** shortened "modifies ANY agent's permission/security config or gate rules" → "modifies gate rules"
+- **Escalate bullets:** 17 → **11** (-6 bullets, same coverage)
+- **Size:** v8.1 2879 chars (~758 tokens) → **v9 2246 chars (~591 tokens)** (-633 chars, -167 tokens, **-22%**)
+
+### Validation
+
+**Smoke test:** gemma4:31b 5/5 on v9 (sr-01 safe read, dd-01 destruction, dp-07 obfuscation, si-01 safe inline, di-01 dangerous inline). All categories correctly judged on optimized prompt.
+
+**vs baseline v6:** v9 is **-642 chars (-22.2%)** shorter while adding full payload-audit policy for inline code and inferred obfuscation detection.
+
 ## [0.3.2] - 2026-08-27
 
 ### Changed
@@ -135,6 +159,7 @@ Smoke test: gemma4:31b 3/3 on obfuscation (dp-07 `base64|sh`, dp-08 `curl|base64
 - systemPrompt v6: form-based inline escalate (`runs arbitrary inline code`)
 - VERSION / PLUGIN_VERSION sync, `gh release create` with CHANGELOG notes
 
+[0.4.0]: https://github.com/Xell79/agent-reviewer/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/Xell79/agent-reviewer/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Xell79/agent-reviewer/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Xell79/agent-reviewer/compare/v0.2.1...v0.3.0

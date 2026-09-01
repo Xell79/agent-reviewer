@@ -194,6 +194,7 @@ in `~/.config/kilo/agent-reviewer.json` (`chmod 600`); that file is gitignored.
 | `groq-gpt-oss-20b` | api.groq.com/openai/v1 | `openai/gpt-oss-20b` | 8000 | 256 | false | `reasoning_effort: low` |
 | `cohere` | api.cohere.com/v2 | `command-a-plus-05-2026` | 8000 | 512 | false | `apiFormat: cohere-v2` |
 | `xiaomi-mimo` | token-plan-sgp.xiaomimimo.com/v1 | `mimo-v2.5` | 30000 | 256 | **true** | last fallback |
+| `kirocc-qwen3-coder-next` | `http://127.0.0.1:3456/v1` | `qwen3-coder-next` | 8000 | 512 | false | local Anthropic proxy; **not** in default `order`; needs `headers` |
 
 Live chain: **Ollama gemma4:31b → Groq Qwen 3.6 → Laguna →
 Codestral → Together Bonsai → Ministral-8B → Groq gpt-oss-20b →
@@ -223,6 +224,11 @@ muse-glimmer skipped (NIM DEGRADED).
 **Groq fetch extras in `callReviewer`:** `User-Agent` always;
 `max_completion_tokens` when tier is groq / baseURL contains `api.groq.com`.
 
+**`headers`:** optional `Record<string, string>` on a tier. Plugin
+defaults (`Content-Type`, `Authorization: Bearer <key>`, `User-Agent`,
+Cohere `Accept`) are set first; `tier.headers` is spread after, so a
+colliding key uses the tier value. Same merge in `check-agent-reviewer.py`.
+
 ### TierConfig
 
 ```ts
@@ -239,6 +245,7 @@ type TierConfig = {
   apiFormat?: "openai" | "cohere-v2"
   thinkingBudget?: number // cohere-v2 only
   reasoningEffort?: string
+  headers?: Record<string, string> // merged after defaults; tier wins
 }
 ```
 

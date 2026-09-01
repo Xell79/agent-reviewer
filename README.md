@@ -124,6 +124,7 @@ Enabled by `order` in `agent-reviewer.json`. Timeout **8s** except MiMo (**30s**
 | 7 | `groq-gpt-oss-20b` | `openai/gpt-oss-20b` |
 | 8 | `cohere` | `command-a-plus-05-2026` |
 | 9 | `xiaomi-mimo` | `mimo-v2.5` |
+| — | `kirocc-qwen3-coder-next` | `qwen3-coder-next` (local Anthropic proxy; optional, not in default `order`) |
 
 <details>
 <summary>Config fields</summary>
@@ -138,12 +139,22 @@ Override path: `AGENT_REVIEWER_CONFIG`.
 Per tier: `baseURL`, `model`, `apiKey` **or** `apiKeyEnv`,
 optional `timeoutMs` (8000), `maxTokens` (512),
 `jsonObject` (false), `apiFormat` (`openai`/`cohere-v2`),
-`thinkingBudget`, `reasoningEffort`, `fallbackModels`.
+`thinkingBudget`, `reasoningEffort`, `fallbackModels`,
+`headers` (`Record<string, string>`).
+
+`headers` are merged after the plugin defaults
+(`Content-Type`, `Authorization: Bearer <key>`, `User-Agent`,
+Cohere `Accept`). On a colliding key, the tier value wins.
+Use for provider-specific headers (`anthropic-version`,
+session ids on a local proxy).
 
 Auth: non-empty `apiKey` wins; else `process.env[apiKeyEnv]`;
 else throw and **immediate** cooldown.
 
 Full redacted snapshot: [`agent-reviewer.json.example`](./agent-reviewer.json.example).
+
+Validate syntax: `scripts/json-lint ~/.config/kilo/agent-reviewer.json`
+(or `python3 -m json.tool <file> > /dev/null`, or `jq empty <file>`).
 
 </details>
 
@@ -264,7 +275,8 @@ Parity with `callReviewer`: OpenAI `POST {base}/chat/completions`,
 Cohere `apiFormat: cohere-v2` → `POST {base}/chat`, Groq
 `max_completion_tokens`, Nemotron `/no_think`, `jsonObject` →
 `response_format: json_object`. Key order: `tier.apiKey`, then
-`env(tier.apiKeyEnv)`.
+`env(tier.apiKeyEnv)`. `tier.headers` merged after standard
+headers (tier value wins on collision).
 
 </details>
 
@@ -277,6 +289,7 @@ Cohere `apiFormat: cohere-v2` → `POST {base}/chat`, Groq
 | `VERSION` | Semver (source of truth; not copied to dest) |
 | `CHANGELOG.md` | Keep a Changelog; GitHub Release notes |
 | `scripts/install.sh` | Install/update (**never** writes live JSON) |
+| `scripts/json-lint` | Lightweight JSON validator (Python, zero deps) |
 | `check-agent-reviewer.py` | Probe every configured model (local; not installed) |
 | `AGENTS.md` | Hooks, schemas, edit constraints |
 | `LICENSE` | MIT |
