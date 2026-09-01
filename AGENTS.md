@@ -242,7 +242,7 @@ type TierConfig = {
   timeoutMs?: number      // default 8000 in callReviewer
   maxTokens?: number      // default 512
   jsonObject?: boolean    // default false; only attach response_format when true
-  apiFormat?: "openai" | "cohere-v2"
+  apiFormat?: "openai" | "cohere-v2" | "anthropic" // default "openai"
   thinkingBudget?: number // cohere-v2 only
   reasoningEffort?: string
   headers?: Record<string, string> // merged after defaults; tier wins
@@ -251,9 +251,9 @@ type TierConfig = {
 
 ### URL construction
 
-```ts
-const url = `${baseURL.replace(/\/+$/, "")}/chat/completions`
-```
+- `openai` (default when `apiFormat` omitted): `${baseURL.replace(/\/+$/, "")}/chat/completions`
+- `cohere-v2`: `${baseURL.replace(/\/+$/, "")}/chat`
+- `anthropic`: `${baseURL.replace(/\/+$/, "")}/messages`
 
 Cohere live tier uses **native** `apiFormat: "cohere-v2"` → `POST {base}/chat`
 (not the old compatibility `/v1/chat/completions` path).
@@ -270,8 +270,7 @@ Cohere live tier uses **native** `apiFormat: "cohere-v2"` → `POST {base}/chat`
 
 ### Gate-suite baseline (18 cases)
 
-Plugin-exact `DEFAULT_SYSTEM_PROMPT` / config `systemPrompt` +
-`buildUserMessage` + parse/heuristic.
+Config `systemPrompt` + `buildUserMessage` + parse/heuristic.
 Measured standalone (first-definitive → only first reachable
 score matters live):
 
@@ -398,9 +397,9 @@ Keep in sync with any external gate-suite `um()` helper.
 
 ## SYSTEM_PROMPT (policy)
 
-Prefer `systemPrompt` in `agent-reviewer.json` (hot-reloaded). Fallback is
-in-source `DEFAULT_SYSTEM_PROMPT`. Agents must **not** weaken escalate rules
-without explicit user instruction. Summary:
+Read from `systemPrompt` in `agent-reviewer.json` (hot-reloaded). If missing
+or empty, all requests fail-closed escalate immediately to human. Agents
+must **not** weaken escalate rules without explicit user instruction. Summary:
 
 - Output: single JSON object, schema `decision` + `reason` (≤160 chars reason).
 - Always escalate: destructive ops, privilege/injection, secrets,
@@ -498,7 +497,7 @@ only the interactive shell.
   (`FALLBACK_TIERS` stays empty).
 - Adjust `timeoutMs` / `maxTokens` with measured latency + token peaks.
 - Add dlog fields (sync only).
-- Strengthen `systemPrompt` / `DEFAULT_SYSTEM_PROMPT` escalate rules (user-approved).
+- Strengthen `systemPrompt` escalate rules (user-approved).
 - Fix parse/heuristic bugs without relaxing fail-closed.
 
 ### Dangerous / forbidden without explicit user OK

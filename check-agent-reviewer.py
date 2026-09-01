@@ -11,8 +11,10 @@ run in parallel; models that share a baseURL stay sequential (sleep/retry
 policy applies inside that lane only).
 
 The request format replicates plugin/agent-reviewer.ts exactly:
-  - openai format:   POST {baseURL}/chat/completions
+  - apiFormat:       "openai" (default when omitted), "cohere-v2", or "anthropic"
+  - openai format:   POST {baseURL}/chat/completions (default)
   - cohere-v2:       POST {baseURL}/chat  (thinking budget, no reasoning_effort)
+  - anthropic:       POST {baseURL}/messages  (top-level system, x-api-key)
   - groq / cerebras+gpt-oss: max_completion_tokens instead of max_tokens
   - nemotron models: "/no_think" appended to the system message
   - jsonObject tiers: response_format {"type": "json_object"}
@@ -195,7 +197,7 @@ class ProbeTarget:
 
 def load_config(path: Path) -> dict[str, Any]:
     try:
-        with open(path, encoding="utf-8") as f:
+        with path.open(encoding="utf-8") as f:
             return json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         print(paint(f"config error: {path}: {e}", RED), file=sys.stderr)
@@ -216,7 +218,7 @@ def resolve_api_key(tier_cfg: dict[str, Any]) -> str | None:
 
 
 def is_nemotron(model: str) -> bool:
-    return bool(re.search(r"nemotron", model, re.I))
+    return bool(re.search(r"nemotron", model, re.IGNORECASE))
 
 
 def build_probe_messages(model: str, json_mode: bool) -> list[dict[str, str]]:
@@ -234,14 +236,19 @@ def build_probe_messages(model: str, json_mode: bool) -> list[dict[str, str]]:
 
 def merge_headers(api_key: str, tier_cfg: dict[str, Any]) -> dict[str, str]:
     """Standard plugin headers, then tier.headers (tier value wins on collision)."""
-    is_cohere_v2 = tier_cfg.get("apiFormat") == "cohere-v2"
+    api_format = tier_cfg.get("apiFormat") or "openai"
+    is_anthropic = api_format == "anthropic"
+    is_cohere_v2 = api_format == "cohere-v2"
     headers: dict[str, str] = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}",
         "User-Agent": "agent-reviewer-check/1.0",
     }
-    if is_cohere_v2:
-        headers["Accept"] = "application/json"
+    if is_anthropic:
+        headers["x-api-key"] = api_key
+    else:
+        headers["Authorization"] = f"Bearer {api_key}"
+        if is_cohere_v2:
+            headers["Accept"] = "application/json"
     extra = tier_cfg.get("headers")
     if isinstance(extra, dict):
         for k, v in extra.items():
@@ -261,14 +268,38 @@ def build_request_parts(
 ) -> tuple[str, dict[str, Any], dict[str, str]]:
     """Return (url, body, headers) replicating plugin callReviewerOnce()."""
     base = str(tier_cfg.get("baseURL", "")).rstrip("/")
-    is_cohere_v2 = tier_cfg.get("apiFormat") == "cohere-v2"
-    url = f"{base}/chat" if is_cohere_v2 else f"{base}/chat/completions"
+    api_format = tier_cfg.get("apiFormat") or "openai"
+    is_anthropic = api_format == "anthropic"
+    is_cohere_v2 = api_format == "cohere-v2"
+    if is_anthropic:
+        url = f"{base}/messages"
+    elif is_cohere_v2:
+        url = f"{base}/chat"
+    else:
+        url = f"{base}/chat/completions"
 
     max_tokens = tier_cfg.get("maxTokens") or 512
-    is_groq = "api.groq.com" in base or tier_name.startswith("groq")
-    is_cerebras_gptoss = "cerebras.ai" in base and re.search(r"gpt-oss", model, re.I)
+    if is_anthropic:
+        system_msg = next(
+            (m["content"] for m in messages if m.get("role") == "system"), None,
+        )
+        user_msgs = [m for m in messages if m.get("role") != "system"]
+        body: dict[str, Any] = {
+            "model": model,
+            "messages": user_msgs,
+            "max_tokens": max_tokens,
+            "temperature": 0,
+        }
+        if system_msg:
+            body["system"] = system_msg
+        return url, body, merge_headers(api_key, tier_cfg)
 
-    body: dict[str, Any] = {"model": model, "messages": messages, "temperature": 0}
+    is_groq = "api.groq.com" in base or tier_name.startswith("groq")
+    is_cerebras_gptoss = (
+        "cerebras.ai" in base and re.search(r"gpt-oss", model, re.IGNORECASE)
+    )
+
+    body = {"model": model, "messages": messages, "temperature": 0}
     if is_groq or is_cerebras_gptoss:
         body["max_completion_tokens"] = max_tokens
     else:
@@ -288,7 +319,7 @@ def build_request_parts(
         body["response_format"] = {"type": "json_object"}
 
     reasoning_effort = tier_cfg.get("reasoningEffort") or tier_cfg.get(
-        "reasoning_effort"
+        "reasoning_effort",
     )
     if not is_cohere_v2 and isinstance(reasoning_effort, str) and reasoning_effort:
         body["reasoning_effort"] = reasoning_effort
@@ -297,10 +328,25 @@ def build_request_parts(
 
 
 def extract_reply(payload: dict[str, Any]) -> tuple[str, str]:
-    """Extract assistant text from openai or cohere-v2 response shapes.
+    """Extract assistant text from openai, anthropic, or cohere-v2 response shapes.
 
     Returns (text, finish_reason); text empty string means unusable reply.
     """
+    # Anthropic native shape:
+    # { content: [ { type: "text", text: "..." } ], stop_reason: "end_turn" }
+    raw_content = payload.get("content")
+    if isinstance(raw_content, list):
+        parts: list[str] = []
+        for p in raw_content:
+            if isinstance(p, dict):
+                t = p.get("text")
+                if isinstance(t, str):
+                    parts.append(t)
+            elif isinstance(p, str):
+                parts.append(p)
+        if parts and "".join(parts).strip():
+            return "".join(parts).strip(), str(payload.get("stop_reason") or "")
+
     # OpenAI-compatible shape
     choices = payload.get("choices")
     if isinstance(choices, list) and choices:
@@ -322,7 +368,7 @@ def extract_reply(payload: dict[str, Any]) -> tuple[str, str]:
 
 
 def http_post_json(
-    url: str, body: dict[str, Any], headers: dict[str, str], timeout_s: float
+    url: str, body: dict[str, Any], headers: dict[str, str], timeout_s: float,
 ) -> tuple[int, dict[str, Any] | str]:
     req = urllib.request.Request(
         url,
@@ -344,7 +390,7 @@ def http_post_json(
         # socket.timeout lands here as URLError(reason=timeout)
         reason = getattr(e, "reason", None) or e
         raise _HttpError(
-            0, one_line(f"{type(reason).__name__}: {reason}", 160)
+            0, one_line(f"{type(reason).__name__}: {reason}", 160),
         ) from None
 
 
@@ -364,7 +410,7 @@ ProgressFn = Callable[[str, int, str, str], Awaitable[None]]
 
 
 async def sleep_ticks(
-    seconds: float, on_tick: Callable[[float], Awaitable[None]] | None = None
+    seconds: float, on_tick: Callable[[float], Awaitable[None]] | None = None,
 ) -> None:
     """Sleep `seconds`, invoking on_tick(remaining) about once per second."""
     if seconds <= 0:
@@ -391,7 +437,7 @@ async def probe_model(
 ) -> CheckResult:
     disabled = tier_cfg.get("disabled") is True
     res = CheckResult(
-        tier=tier_name, model=model, status=SKIP, fallback=fallback, disabled=disabled
+        tier=tier_name, model=model, status=SKIP, fallback=fallback, disabled=disabled,
     )
 
     api_key = resolve_api_key(tier_cfg)
@@ -410,7 +456,7 @@ async def probe_model(
     )
 
     async def progress(
-        status: str, attempt: int, note: str = "", http: str = ""
+        status: str, attempt: int, note: str = "", http: str = "",
     ) -> None:
         if on_progress:
             await on_progress(status, attempt, note, http)
@@ -421,7 +467,7 @@ async def probe_model(
         start = time.monotonic()
         try:
             code, payload = await asyncio.to_thread(
-                http_post_json, url, body, headers, timeout_ms / 1000.0
+                http_post_json, url, body, headers, timeout_ms / 1000.0,
             )
         except _HttpError as e:
             res.status = FAIL
@@ -431,7 +477,7 @@ async def probe_model(
             if attempt <= retries and should_retry(e.code):
 
                 async def _tick(
-                    left: float, _e: _HttpError = e, _att: int = attempt
+                    left: float, _e: _HttpError = e, _att: int = attempt,
                 ) -> None:
                     await progress(
                         RETRY,
@@ -469,7 +515,7 @@ async def probe_model(
 
 
 def iter_checks(
-    cfg: dict[str, Any], only: set[str] | None
+    cfg: dict[str, Any], only: set[str] | None,
 ) -> list[tuple[str, dict[str, Any]]]:
     """Tiers from `order` first (in listed order), then the rest (config order)."""
     tiers: dict[str, Any] = cfg.get("tiers") or {}
@@ -507,7 +553,7 @@ def flatten_targets(queue: list[tuple[str, dict[str, Any]]]) -> list[ProbeTarget
                 model=primary or "?",
                 tier_cfg=tier_cfg,
                 disabled=disabled,
-            )
+            ),
         )
         for fb in tier_cfg.get("fallbackModels") or []:
             if not fb:
@@ -519,7 +565,7 @@ def flatten_targets(queue: list[tuple[str, dict[str, Any]]]) -> list[ProbeTarget
                     tier_cfg=tier_cfg,
                     fallback=True,
                     disabled=disabled,
-                )
+                ),
             )
     return targets
 
@@ -545,7 +591,7 @@ def _glyphs() -> dict[str, str]:
             RETRY: "↻",
             OK: "✓",
             FAIL: "✗",
-            SKIP: "–",
+            SKIP: "–",  # noqa: RUF001 — intentional EN DASH glyph
             INTERRUPTED: "■",
         }
     return {
@@ -578,7 +624,7 @@ def _status_style(status: str) -> tuple[str, str | None]:
 def format_row(row: ProbeTarget, label_w: int, model_w: int) -> str:
     glyph, color = _status_style(row.status)
     glyph_s = paint(
-        f"{glyph:<2}", color, BOLD if row.status in {OK, FAIL, CHECKING} else None
+        f"{glyph:<2}", color, BOLD if row.status in {OK, FAIL, CHECKING} else None,
     )
     label = paint(
         f"{row.label:<{label_w}}",
@@ -595,7 +641,7 @@ def format_row(row: ProbeTarget, label_w: int, model_w: int) -> str:
         latency = "   … "
     else:
         latency = "      "
-    if row.status == OK:
+    if row.status == OK:  # noqa: SIM108 — ternary hurts readability here
         detail = row.reply or row.note
     else:
         detail = row.note
@@ -618,7 +664,7 @@ class Board:
 
     def line(self, row: ProbeTarget) -> str:
         return clip_line(
-            format_row(row, self.label_w, self.model_w), self._term_width()
+            format_row(row, self.label_w, self.model_w), self._term_width(),
         )
 
     def legend(self) -> str:
@@ -667,7 +713,7 @@ class Board:
         self.redraw_all()
 
     async def apply_progress(
-        self, idx: int, status: str, attempt: int, note: str, http: str
+        self, idx: int, status: str, attempt: int, note: str, http: str,
     ) -> None:
         async with self._lock:
             row = self.rows[idx]
@@ -806,7 +852,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=DESCRIPTION)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument(
-        "--only", help="comma-separated tier names to check (default: all)"
+        "--only", help="comma-separated tier names to check (default: all)",
     )
     parser.add_argument(
         "--sleep",
@@ -838,7 +884,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    global use_color, use_live, use_unicode
+    global use_color, use_live, use_unicode  # noqa: PLW0603 — CLI entry point
     use_color = sys.stdout.isatty() and not args.no_color
     use_live = sys.stdout.isatty() and not args.no_live
     use_unicode = _utf8_stdout()
@@ -873,7 +919,7 @@ def main() -> int:
                 sleep_s=args.sleep,
                 retries=args.retries,
                 retry_sleep_s=args.retry_sleep,
-            )
+            ),
         )
     except KeyboardInterrupt:
         interrupted = True

@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-09-01
+
+### Added
+
+- **Per-tier custom headers**: Added `headers?: Record<string, string>` support to `agent-reviewer.ts`, `check-agent-reviewer.py`, and `scripts/gate_suite_unified.py` (merged after defaults; tier values win on collision).
+- **Anthropic wire format**: Added `apiFormat: "anthropic"` (`POST ${baseURL}/messages` with top-level `system` and `x-api-key` header) across plugin, checker, and test suites.
+- **JSON test datasets**: Converted `scripts/gate_cases_extended.py` to `scripts/gate_cases_extended.json` and added `scripts/gate_balanced18_gold.json`.
+- **JSON linter tool**: Added zero-dependency `scripts/json-lint` tool for syntax validation.
+- **Unified test harness CLI improvements**: Added `--list-providers` with 1-based indexing, numeric provider selection (`--providers 1,3` or `--providers 1-3`), and argument default values in `--help`.
+
+### Changed
+
+- **System prompt safe temporary directories**: Replaced separate outside-workspace rule with reinforced user home directory protection in system config rule, treating `/tmp` and workspace paths safely.
+- **Fail-closed system prompt policy**: Removed in-source `DEFAULT_SYSTEM_PROMPT` fallback. If `systemPrompt` is missing or empty in `agent-reviewer.json`, all requests immediately fail-closed escalate to human without invoking model tiers.
+- **Removed `--provider` CLI flag**: Standardized on `--providers` in `scripts/gate_suite_unified.py`.
+
 ## [0.4.0] - 2026-08-27
 
 ### Changed

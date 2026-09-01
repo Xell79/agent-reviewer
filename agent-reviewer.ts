@@ -27,7 +27,7 @@ import {
 } from "./lib/least-connections.ts";
 
 /** Semver; keep in sync with root `VERSION`. Not a named export (Kilo auto-scan). */
-const PLUGIN_VERSION = "0.4.0";
+const PLUGIN_VERSION = "0.5.0";
 
 // ---------------------------------------------------------------------------
 // File-based debug log (survives when client.app.log is silent / hanging).
@@ -187,7 +187,9 @@ function clearPendingEscalate(opts?: {
 			if (!fs.existsSync(file)) continue;
 			if (opts?.requestID) {
 				try {
-					const cur = JSON.parse(fs.readFileSync(file, "utf8")) as PendingEscalate;
+					const cur = JSON.parse(
+						fs.readFileSync(file, "utf8"),
+					) as PendingEscalate;
 					if (cur?.requestID && cur.requestID !== opts.requestID) continue;
 				} catch {
 					// corrupt leftover — drop it
@@ -289,8 +291,8 @@ type TierConfig = {
 	 * Defensive JSON extraction still applies.
 	 */
 	jsonObject?: boolean;
-	/** API wire format. "openai" (default) = /chat/completions; "cohere-v2" = /v2/chat native. */
-	apiFormat?: "openai" | "cohere-v2";
+	/** API wire format. "openai" (default when omitted) = /chat/completions; "cohere-v2" = /v2/chat native; "anthropic" = /v1/messages native. */
+	apiFormat?: "openai" | "cohere-v2" | "anthropic";
 	/** Cohere v2 only: thinking token budget (limits reasoning tokens). */
 	thinkingBudget?: number;
 	/**
@@ -333,7 +335,7 @@ type ReviewerOptions = {
 	cache?: boolean;
 	/** Per-tier operational cooldown after throw (ms). Default 30m. */
 	tierCooldownMs?: number;
-	/** Safety-gate system prompt; if empty/missing, DEFAULT_SYSTEM_PROMPT. */
+	/** Safety-gate system prompt; if empty/missing in config, all asks fail-closed escalate. */
 	systemPrompt?: string;
 	[key: string]: unknown;
 };
@@ -499,46 +501,7 @@ const DEFAULT_TIER_COOLDOWN_MS = 30 * 60 * 1000;
 const DEFAULT_CONFIG_PATH = `${process.env.HOME ?? ""}/.config/kilo/agent-reviewer.json`;
 
 /** No secrets in source — empty fallback if config file missing (fail-closed). */
-const FALLBACK_TIERS: TierConfig[] = [];
-
-/**
- * Built-in system prompt fallback when config omits `systemPrompt`.
- * Prefer editing systemPrompt in agent-reviewer.json (hot-reloaded).
- */
-const DEFAULT_SYSTEM_PROMPT = `Safety gate for a coding agent.
-
-Reply with ONLY this JSON, nothing before or after:
-{"decision":"approve"|"escalate","reason":"≤50 chars"}
-
-PRINCIPLES
-- Judge what the command DOES, not the leading word. Wrappers (find -exec, xargs, $()) count.
-- Chained commands (&&, ||, ;, &, |): escalate if ANY part is dangerous.
-- File written earlier then executed: the written content is part of the action.
-- Inline code (python -c, heredoc, node -e, bash -c): judge the PAYLOAD by all other rules as if it ran directly.
-
-ESCALATE if the action:
-- destroys data/systems (rm -rf, mkfs, dd, force-push, mass delete, find -delete/xargs rm, cloud bucket recursive delete)
-- in-place file mutation from shell (sed -i, perl -i, ed)
-- escalates privilege/injects (sudo, su, curl|sh from untrusted host, eval remote, chmod 777)
-- leaks data: prints/sends secrets/env/config/logs to external URLs; probes webhook endpoints
-- modifies system config (/etc, ~/.ssh, boot, shell profiles, crontab, system services, package managers)
-- writes outside workspace (> ~/, >> /tmp/…)
-- backgrounds/daemonizes processes (nohup, &, disown, screen, tmux send)
-- deploys/publishes: push to main/master, production infra (terraform/kubectl/helm/docker push), package registries (npm/pip/gem/cargo publish)
-- weakens security (disable TLS/firewall, grant IAM admin, strict-ssl false)
-- modifies gate rules (self-modification)
-- is truly opaque (cannot determine what will happen)
-
-APPROVE if routine:
-- read-only shell (ls, cat, find -name, rg, head, tail, git status/log/diff, tests, builds, installs from manifests)
-- scoped deletes of local build dirs (./dist, node_modules, ./build)
-- config structure checks (field names, model ids, counts, whitelist size) — not credential dumps
-- non-secret config edits (model lists/metadata); source edits; non-destructive git; git push to feature branches
-- reading own logs/debug/plugin source (log text may mention secrets — approve unless extracts credential VALUES)
-- standard credential USE in compound commands: source .env && <build/connect>; npm whoami; official toolchain installers (rustup.rs, bun.sh) via curl|sh
-
-Names/existence = approve. Values/use/exfil = escalate.
-Prefer approve when safe. Keep reason to a few words.`;
+const _FALLBACK_TIERS: TierConfig[] = [];
 
 function configPath(): string {
 	const fromEnv = process.env.AGENT_REVIEWER_CONFIG;
@@ -564,7 +527,8 @@ function normalizeTier(raw: unknown, forcedName?: string): TierConfig | null {
 		baseURL: t.baseURL,
 		model: t.model,
 	};
-	if (typeof t.apiKey === "string" && t.apiKey.length > 0) out.apiKey = t.apiKey;
+	if (typeof t.apiKey === "string" && t.apiKey.length > 0)
+		out.apiKey = t.apiKey;
 	if (typeof t.apiKeyEnv === "string" && t.apiKeyEnv.length > 0)
 		out.apiKeyEnv = t.apiKeyEnv;
 	if (typeof t.timeoutMs === "number" && t.timeoutMs > 0)
@@ -572,7 +536,11 @@ function normalizeTier(raw: unknown, forcedName?: string): TierConfig | null {
 	if (typeof t.maxTokens === "number" && t.maxTokens > 0)
 		out.maxTokens = t.maxTokens;
 	if (typeof t.jsonObject === "boolean") out.jsonObject = t.jsonObject;
-	if (t.apiFormat === "openai" || t.apiFormat === "cohere-v2")
+	if (
+		t.apiFormat === "openai" ||
+		t.apiFormat === "cohere-v2" ||
+		t.apiFormat === "anthropic"
+	)
 		out.apiFormat = t.apiFormat;
 	if (typeof t.thinkingBudget === "number" && t.thinkingBudget > 0)
 		out.thinkingBudget = t.thinkingBudget;
@@ -585,28 +553,28 @@ function normalizeTier(raw: unknown, forcedName?: string): TierConfig | null {
 					: "";
 		if (re.trim().length > 0) out.reasoningEffort = re.trim();
 	}
-		if (Array.isArray(t.fallbackModels)) {
-			const fb = t.fallbackModels
-				.filter((m): m is string => typeof m === "string" && m.length > 0)
-				.filter((m) => m !== out.model);
-			if (fb.length) out.fallbackModels = fb;
-		}
-		if (
-			typeof t.headers === "object" &&
-			t.headers !== null &&
-			!Array.isArray(t.headers)
-		) {
-			const h: Record<string, string> = {};
-			for (const [k, v] of Object.entries(t.headers as Record<string, unknown>)) {
-				if (typeof k === "string" && typeof v === "string") {
-					const key = k.trim();
-					const val = v.trim();
-					if (key && val) h[key] = val;
-				}
+	if (Array.isArray(t.fallbackModels)) {
+		const fb = t.fallbackModels
+			.filter((m): m is string => typeof m === "string" && m.length > 0)
+			.filter((m) => m !== out.model);
+		if (fb.length) out.fallbackModels = fb;
+	}
+	if (
+		typeof t.headers === "object" &&
+		t.headers !== null &&
+		!Array.isArray(t.headers)
+	) {
+		const h: Record<string, string> = {};
+		for (const [k, v] of Object.entries(t.headers as Record<string, unknown>)) {
+			if (typeof k === "string" && typeof v === "string") {
+				const key = k.trim();
+				const val = v.trim();
+				if (key && val) h[key] = val;
 			}
-			if (Object.keys(h).length > 0) out.headers = h;
 		}
-		return out;
+		if (Object.keys(h).length > 0) out.headers = h;
+	}
+	return out;
 }
 
 /**
@@ -736,7 +704,8 @@ function buildRuntime(
 	const cfg: FileConfig = { ...file.cfg, ...(options ?? {}) };
 	if (options?.tiers !== undefined) cfg.tiers = options.tiers;
 	if (options?.order !== undefined) cfg.order = options.order;
-	if (options?.systemPrompt !== undefined) cfg.systemPrompt = options.systemPrompt;
+	if (options?.systemPrompt !== undefined)
+		cfg.systemPrompt = options.systemPrompt;
 
 	const map = tiersMapFromConfig(cfg);
 	const { order, tiers, skipped } = resolveOrder(cfg, map);
@@ -756,8 +725,8 @@ function buildRuntime(
 
 	const systemPrompt =
 		typeof cfg.systemPrompt === "string" && cfg.systemPrompt.trim().length > 0
-			? cfg.systemPrompt
-			: DEFAULT_SYSTEM_PROMPT;
+			? cfg.systemPrompt.trim()
+			: "";
 
 	return {
 		tiers,
@@ -825,7 +794,7 @@ function getRuntimeConfig(options?: ReviewerOptions): RuntimeConfig {
 }
 
 /** @deprecated use getRuntimeConfig — kept name for any external references */
-function loadFileConfig(): FileConfig {
+function _loadFileConfig(): FileConfig {
 	return readConfigFile().cfg;
 }
 
@@ -978,8 +947,25 @@ function cacheKey(
 	}
 }
 
-/** Pull assistant text from OpenAI-compatible + NIM reasoning-style + Cohere v2 payloads. */
+/** Pull assistant text from OpenAI-compatible + Anthropic + NIM reasoning-style + Cohere v2 payloads. */
 function extractAssistantText(data: unknown): string {
+	// Anthropic native: data.content[] with {type:"text", text}
+	const anthropicContent = (data as { content?: unknown })?.content;
+	if (Array.isArray(anthropicContent)) {
+		const texts: string[] = [];
+		for (const part of anthropicContent) {
+			if (part && typeof part === "object") {
+				const p = part as { type?: string; text?: string };
+				if (typeof p.text === "string" && (p.type === "text" || !p.type)) {
+					texts.push(p.text);
+				}
+			} else if (typeof part === "string") {
+				texts.push(part);
+			}
+		}
+		if (texts.length && texts.join("").trim()) return texts.join("");
+	}
+
 	// Cohere v2 native: data.message.content[] with {type:"text"|"thinking", text|thinking}
 	const v2Msg = (data as { message?: { content?: unknown } })?.message;
 	if (v2Msg && Array.isArray(v2Msg.content)) {
@@ -1090,7 +1076,9 @@ function isNemotronModel(model: string): boolean {
  * Official NIM/HF switch: chat_template_kwargs.enable_thinking=false.
  * Safe extra on older Nano / Ollama when combined with `/no_think`.
  */
-function nemotronDisableThinkingKwargs(model: string): Record<string, unknown> | undefined {
+function nemotronDisableThinkingKwargs(
+	model: string,
+): Record<string, unknown> | undefined {
 	if (!isNemotronModel(model)) return undefined;
 	return { enable_thinking: false };
 }
@@ -1124,8 +1112,13 @@ async function callReviewerOnce(
 	if (!apiKey) throw new Error(`missing api key for tier ${tier.name}`);
 
 	const base = tier.baseURL.replace(/\/+$/, "");
+	const isAnthropic = tier.apiFormat === "anthropic";
 	const isCohereV2 = tier.apiFormat === "cohere-v2";
-	const url = isCohereV2 ? `${base}/chat` : `${base}/chat/completions`;
+	const url = isAnthropic
+		? `${base}/messages`
+		: isCohereV2
+			? `${base}/chat`
+			: `${base}/chat/completions`;
 	const timeoutMs =
 		typeof tier.timeoutMs === "number" && tier.timeoutMs > 0
 			? tier.timeoutMs
@@ -1138,8 +1131,7 @@ async function callReviewerOnce(
 		typeof tier.maxTokens === "number" && tier.maxTokens > 0
 			? tier.maxTokens
 			: 512;
-	const isGroq =
-		tier.name === "groq" || tier.baseURL.includes("api.groq.com");
+	const isGroq = tier.name === "groq" || tier.baseURL.includes("api.groq.com");
 	// Cerebras gpt-oss wants max_completion_tokens only (not max_tokens).
 	const isCerebrasGptOss =
 		tier.baseURL.includes("cerebras.ai") && /gpt-oss/i.test(model);
@@ -1148,39 +1140,56 @@ async function callReviewerOnce(
 	// consume max_tokens and leave content empty (finish=length).
 	const outboundMessages = messagesForModel(model, messages);
 
-	const body: Record<string, unknown> = {
-		model,
-		messages: outboundMessages,
-		temperature: 0,
-	};
-	if (isGroq || isCerebrasGptOss) {
-		body.max_completion_tokens = maxTok;
+	let body: Record<string, unknown>;
+	if (isAnthropic) {
+		const systemMsg = outboundMessages.find((m) => m.role === "system");
+		const userMsgs = outboundMessages.filter((m) => m.role !== "system");
+		body = {
+			model,
+			messages: userMsgs,
+			max_tokens: maxTok,
+			temperature: 0,
+			...(systemMsg?.content ? { system: systemMsg.content } : {}),
+		};
 	} else {
-		// Reasoning models (Cohere default) spend tokens on chain-of-thought first.
-		body.max_tokens = maxTok;
-	}
-	// Cohere v2: limit reasoning tokens via thinking budget.
-	// Full disable (type=disabled / reasoning_effort=none) triggers server 422
-	// INVALID_TOOL_GENERATION on prompts >~200 chars — budget is the only reliable way.
-	if (isCohereV2 && typeof tier.thinkingBudget === "number" && tier.thinkingBudget > 0) {
-		body.thinking = { type: "enabled", token_budget: tier.thinkingBudget };
-	}
-	// Only attach when explicitly requested — free gateway models often 400 on this.
-	if (tier.jsonObject === true) {
-		body.response_format = { type: "json_object" };
-	}
-	// Per-tier reasoning_effort (qwen3.6 none, gpt-oss low, …). Skip for Cohere v2.
-	if (
-		!isCohereV2 &&
-		typeof tier.reasoningEffort === "string" &&
-		tier.reasoningEffort.length > 0
-	) {
-		body.reasoning_effort = tier.reasoningEffort;
-	}
-	// Nemotron 3 Super / 3.5 Lightning: /no_think is ignored; official off-switch.
-	const thinkKw = nemotronDisableThinkingKwargs(model);
-	if (!isCohereV2 && thinkKw) {
-		body.chat_template_kwargs = thinkKw;
+		body = {
+			model,
+			messages: outboundMessages,
+			temperature: 0,
+		};
+		if (isGroq || isCerebrasGptOss) {
+			body.max_completion_tokens = maxTok;
+		} else {
+			// Reasoning models (Cohere default) spend tokens on chain-of-thought first.
+			body.max_tokens = maxTok;
+		}
+		// Cohere v2: limit reasoning tokens via thinking budget.
+		// Full disable (type=disabled / reasoning_effort=none) triggers server 422
+		// INVALID_TOOL_GENERATION on prompts >~200 chars — budget is the only reliable way.
+		if (
+			isCohereV2 &&
+			typeof tier.thinkingBudget === "number" &&
+			tier.thinkingBudget > 0
+		) {
+			body.thinking = { type: "enabled", token_budget: tier.thinkingBudget };
+		}
+		// Only attach when explicitly requested — free gateway models often 400 on this.
+		if (tier.jsonObject === true) {
+			body.response_format = { type: "json_object" };
+		}
+		// Per-tier reasoning_effort (qwen3.6 none, gpt-oss low, …). Skip for Cohere v2.
+		if (
+			!isCohereV2 &&
+			typeof tier.reasoningEffort === "string" &&
+			tier.reasoningEffort.length > 0
+		) {
+			body.reasoning_effort = tier.reasoningEffort;
+		}
+		// Nemotron 3 Super / 3.5 Lightning: /no_think is ignored; official off-switch.
+		const thinkKw = nemotronDisableThinkingKwargs(model);
+		if (!isCohereV2 && thinkKw) {
+			body.chat_template_kwargs = thinkKw;
+		}
 	}
 
 	// dlog only — never app.log (may contain tool args / model text)
@@ -1188,13 +1197,18 @@ async function callReviewerOnce(
 		requestID,
 		tier: tier.name,
 		model,
-		apiFormat: isCohereV2 ? "cohere-v2" : "openai",
+		apiFormat: isAnthropic ? "anthropic" : isCohereV2 ? "cohere-v2" : "openai",
 		max_tokens: body.max_tokens ?? body.max_completion_tokens,
 		thinkingBudget: isCohereV2 ? tier.thinkingBudget : undefined,
 		reasoning_effort: body.reasoning_effort,
 		jsonObject: tier.jsonObject === true,
 		noThink: isNemotronModel(model),
-		enableThinking: thinkKw ? false : undefined,
+		enableThinking:
+			isAnthropic || isCohereV2
+				? undefined
+				: !nemotronDisableThinkingKwargs(model)
+					? undefined
+					: false,
 		headerKeys: tier.headers ? Object.keys(tier.headers) : undefined,
 	});
 
@@ -1203,11 +1217,17 @@ async function callReviewerOnce(
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
-				Authorization: `Bearer ${apiKey}`,
+				...(isAnthropic
+					? {
+							"x-api-key": apiKey,
+							"anthropic-version": "2023-06-01",
+						}
+					: {
+							Authorization: `Bearer ${apiKey}`,
+							...(isCohereV2 ? { Accept: "application/json" } : {}),
+						}),
 				// Groq/Cloudflare: bare clients without UA can get 403 (error 1010).
 				"User-Agent": "agent-reviewer/1.0 (+kilo-plugin)",
-				// Cohere v2 native API requires explicit Accept header.
-				...(isCohereV2 ? { Accept: "application/json" } : {}),
 				...(tier.headers || {}),
 			},
 			body: JSON.stringify(body),
@@ -1227,10 +1247,12 @@ async function callReviewerOnce(
 			throw new Error("empty reviewer content");
 		}
 
-		const finish = isCohereV2
-			? (data as { finish_reason?: string }).finish_reason
-			: (data as { choices?: Array<{ finish_reason?: string }> })
-					?.choices?.[0]?.finish_reason;
+		const finish = isAnthropic
+			? (data as { stop_reason?: string }).stop_reason
+			: isCohereV2
+				? (data as { finish_reason?: string }).finish_reason
+				: (data as { choices?: Array<{ finish_reason?: string }> })
+						?.choices?.[0]?.finish_reason;
 		// Head+tail each ≤400 so safeJson does not further clip either slice.
 		dlog("tier.response", {
 			requestID,
@@ -1391,7 +1413,9 @@ export const AgentReviewerPlugin = async (
 
 	const isTierCooling = (
 		name: string,
-	): { cooling: true; remainMs: number; error: string } | { cooling: false } => {
+	):
+		| { cooling: true; remainMs: number; error: string }
+		| { cooling: false } => {
 		const entry = tierCooldown.get(name);
 		if (!entry) return { cooling: false };
 		const remainMs = entry.untilMs - Date.now();
@@ -1402,9 +1426,7 @@ export const AgentReviewerPlugin = async (
 		return { cooling: true, remainMs, error: entry.error };
 	};
 
-	const coolingNames = (
-		list: readonly { name: string }[],
-	): Set<string> => {
+	const coolingNames = (list: readonly { name: string }[]): Set<string> => {
 		const out = new Set<string>();
 		for (const t of list) {
 			if (isTierCooling(t.name).cooling) out.add(t.name);
@@ -1416,7 +1438,12 @@ export const AgentReviewerPlugin = async (
 		list: readonly TierConfig[],
 		attempted: ReadonlySet<string>,
 	): TierConfig | null =>
-		selectLeastConnections(list, activeConnections, attempted, coolingNames(list));
+		selectLeastConnections(
+			list,
+			activeConnections,
+			attempted,
+			coolingNames(list),
+		);
 
 	const markTierCooldown = (name: string, err: unknown, cooldownMs: number) => {
 		const error = err instanceof Error ? err.message : String(err);
@@ -1618,6 +1645,30 @@ export const AgentReviewerPlugin = async (
 					command:
 						typeof metadata.command === "string" ? metadata.command : undefined,
 				};
+
+				if (!systemPrompt) {
+					log(
+						client,
+						"warn",
+						"systemPrompt missing in agent-reviewer.json; fail-closed escalate to human",
+						{
+							requestID,
+							permission,
+						},
+					);
+					dlog("review.no_system_prompt", {
+						requestID,
+						permission,
+						reason: "systemPrompt missing in config (fail-closed escalate)",
+					});
+					writePendingEscalate({
+						...overlayBase,
+						reason: "gate config error: systemPrompt missing",
+						at: Date.now(),
+					});
+					return;
+				}
+
 				const firstLive = pickTier(tiers, new Set());
 				writePendingEscalate({
 					...overlayBase,
@@ -1870,7 +1921,8 @@ export const AgentReviewerPlugin = async (
 							}
 							return;
 						} catch (err) {
-							const isTimeout = err instanceof Error && err.name === "AbortError";
+							const isTimeout =
+								err instanceof Error && err.name === "AbortError";
 							let appliedCooldownMs = TIER_COOLDOWN_MS;
 
 							if (isTimeout) {
@@ -1894,7 +1946,9 @@ export const AgentReviewerPlugin = async (
 								fallbackModels: tier.fallbackModels,
 								error: err instanceof Error ? err.message : String(err),
 								isTimeout,
-								consecutiveTimeouts: isTimeout ? tierConsecutiveTimeouts.get(tier.name) || 0 : 0,
+								consecutiveTimeouts: isTimeout
+									? tierConsecutiveTimeouts.get(tier.name) || 0
+									: 0,
 								cooldownMs: appliedCooldownMs,
 								active: activeConnections.get(tier.name) ?? 0,
 							});
@@ -1905,7 +1959,9 @@ export const AgentReviewerPlugin = async (
 								fallbackModels: tier.fallbackModels,
 								error: err instanceof Error ? err.message : String(err),
 								isTimeout,
-								consecutiveTimeouts: isTimeout ? tierConsecutiveTimeouts.get(tier.name) || 0 : 0,
+								consecutiveTimeouts: isTimeout
+									? tierConsecutiveTimeouts.get(tier.name) || 0
+									: 0,
 								cooldownMs: appliedCooldownMs,
 								active: activeConnections.get(tier.name) ?? 0,
 							});

@@ -133,14 +133,14 @@ Enabled by `order` in `agent-reviewer.json`. Timeout **8s** except MiMo (**30s**
 
 Root: `order`, `tiers`, `skip` (default `[]`), `cache`
 (default `true`), `tierCooldownMs` (default 30 min),
-`systemPrompt` (else in-source fallback).
+`systemPrompt` (required; if missing/empty, all asks fail-closed escalate).
 Override path: `AGENT_REVIEWER_CONFIG`.
 
 Per tier: `baseURL`, `model`, `apiKey` **or** `apiKeyEnv`,
 optional `timeoutMs` (8000), `maxTokens` (512),
-`jsonObject` (false), `apiFormat` (`openai`/`cohere-v2`),
-`thinkingBudget`, `reasoningEffort`, `fallbackModels`,
-`headers` (`Record<string, string>`).
+`jsonObject` (false), `apiFormat` (`openai` by default;
+`cohere-v2`/`anthropic`), `thinkingBudget`, `reasoningEffort`,
+`fallbackModels`, `headers` (`Record<string, string>`).
 
 `headers` are merged after the plugin defaults
 (`Content-Type`, `Authorization: Bearer <key>`, `User-Agent`,
@@ -272,8 +272,9 @@ look sensitive.
 | `--retry-sleep` | `60` | seconds before a retry |
 
 Parity with `callReviewer`: OpenAI `POST {base}/chat/completions`,
-Cohere `apiFormat: cohere-v2` → `POST {base}/chat`, Groq
-`max_completion_tokens`, Nemotron `/no_think`, `jsonObject` →
+Cohere `apiFormat: cohere-v2` → `POST {base}/chat`,
+Anthropic `apiFormat: anthropic` → `POST {base}/messages`,
+Groq `max_completion_tokens`, Nemotron `/no_think`, `jsonObject` →
 `response_format: json_object`. Key order: `tier.apiKey`, then
 `env(tier.apiKeyEnv)`. `tier.headers` merged after standard
 headers (tier value wins on collision).
@@ -290,6 +291,7 @@ headers (tier value wins on collision).
 | `CHANGELOG.md` | Keep a Changelog; GitHub Release notes |
 | `scripts/install.sh` | Install/update (**never** writes live JSON) |
 | `scripts/json-lint` | Lightweight JSON validator (Python, zero deps) |
+| `scripts/gate_suite_unified.py` | Multi-model benchmark suite (`extended`, `hard10`, `balanced18`) |
 | `check-agent-reviewer.py` | Probe every configured model (local; not installed) |
 | `AGENTS.md` | Hooks, schemas, edit constraints |
 | `LICENSE` | MIT |

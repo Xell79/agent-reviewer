@@ -293,7 +293,7 @@ report_version_drift() {
 	else
 		msg_info "version: repo ${repo}  dest ${dest_ver}"
 		# shellcheck disable=SC2059
-		printf "  ${_c_yellow}-> update available${_c_reset}: dest ${dest_ver} -> repo ${repo}\n"
+		printf "  ${_c_yellow}-> update available${_c_reset}: dest ${dest_ver} → repo ${repo}\n"
 	fi
 }
 
