@@ -31,12 +31,75 @@
       "jsonObject": false,
       "reasoning_effort": "none"
     },
+    "groq-qwen38-27b": {
+      "baseURL": "https://api.groq.com/openai/v1",
+      "apiKey": "{GROQ_KEY}",
+      "model": "qwen/qwen3.8-27b",
+      "timeoutMs": 8000,
+      "maxTokens": 128,
+      "jsonObject": false,
+      "reasoning_effort": "none"
+    },
     "kilo-gateway": {
       "baseURL": "https://app.kilo.ai/api/gateway/v1",
       "apiKey": "{KILO_GATEWAY_KEY}",
       "model": "poolside/laguna-s-2.1:free",
       "timeoutMs": 8000,
       "jsonObject": false
+    },
+    "kilo-nemotron-3.5-lightning": {
+      "baseURL": "https://app.kilo.ai/api/gateway/v1",
+      "apiKey": "{KILO_GATEWAY_KEY}",
+      "model": "nvidia/nemotron-3.5-lightning:free",
+      "timeoutMs": 8000,
+      "maxTokens": 512,
+      "jsonObject": false
+    },
+    "kilo-nemotron-3-nano-omni-30b": {
+      "baseURL": "https://app.kilo.ai/api/gateway/v1",
+      "apiKey": "{KILO_GATEWAY_KEY}",
+      "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+      "timeoutMs": 8000,
+      "maxTokens": 512,
+      "jsonObject": false
+    },
+    "kilo-north-mini-code": {
+      "baseURL": "https://app.kilo.ai/api/gateway/v1",
+      "apiKey": "{KILO_GATEWAY_KEY}",
+      "model": "cohere/north-mini-code:free",
+      "timeoutMs": 8000,
+      "maxTokens": 128,
+      "jsonObject": false,
+      "reasoning_effort": "none"
+    },
+    "kilo-minimax-m2_7": {
+      "baseURL": "https://app.kilo.ai/api/gateway/v1",
+      "apiKey": "{KILO_GATEWAY_KEY}",
+      "model": "minimax/minimax-m2.7:free",
+      "timeoutMs": 8000,
+      "maxTokens": 256,
+      "jsonObject": false,
+      "reasoning": {
+        "max_tokens": 32
+      }
+    },
+    "kilo-ling-3.0-flash-fin": {
+      "baseURL": "https://app.kilo.ai/api/gateway/v1",
+      "apiKey": "{KILO_GATEWAY_KEY}",
+      "model": "inclusionai/ling-3.0-flash-fin:free",
+      "timeoutMs": 8000,
+      "maxTokens": 128,
+      "jsonObject": false,
+      "reasoning_effort": "none"
+    },
+    "kilo-dots-3-note-preview": {
+      "baseURL": "https://app.kilo.ai/api/gateway/v1",
+      "apiKey": "{KILO_GATEWAY_KEY}",
+      "model": "dots-studio/dots-3-note-preview:free",
+      "timeoutMs": 8000,
+      "maxTokens": 128,
+      "jsonObject": false,
+      "reasoning_effort": "none"
     },
     "mistral-codestral": {
       "baseURL": "https://api.mistral.ai/v1",
@@ -59,7 +122,7 @@
       "apiKey": "{GROQ_KEY}",
       "model": "openai/gpt-oss-20b",
       "timeoutMs": 8000,
-      "maxTokens": 256,
+      "maxTokens": 512,
       "jsonObject": false,
       "reasoning_effort": "low"
     },

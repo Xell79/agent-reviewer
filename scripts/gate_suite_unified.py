@@ -21,6 +21,17 @@ Usage:
   python3 gate_suite_unified.py --providers groq-qwen36-27b,together-bonsai-27b --suite balanced18
   python3 gate_suite_unified.py --all-providers --suite hard10
 
+  # start testing from a specific case (continue after interruption)
+  python3 gate_suite_unified.py --providers 1 --from-case 45
+  python3 gate_suite_unified.py --providers 1 --from-case dp-07
+
+  # logging options (default writes to /tmp/gate-unified.log)
+  python3 gate_suite_unified.py --providers 1 --log /tmp/my_test.log
+  python3 gate_suite_unified.py --providers 1 --overwrite
+  python3 gate_suite_unified.py --providers 1 --append
+  python3 gate_suite_unified.py --providers 1 --no-log
+  python3 gate_suite_unified.py --providers kilo-minimax-m2_7 --reasoning-max-tokens 32
+
   # suite choices: extended | balanced18 | hard10 | all
 
 Rate limits:
@@ -45,6 +56,88 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+# ---------------------------------------------------------------------------
+# Logging / stdout tee
+# ---------------------------------------------------------------------------
+
+class TeeStream:
+    """Mirrors stream writes to both the original stream and a log file."""
+
+    def __init__(self, original: Any, log_file: Any) -> None:
+        self.original = original
+        self.log_file = log_file
+
+    def write(self, s: str) -> int:
+        res = self.original.write(s)
+        if self.log_file:
+            try:
+                self.log_file.write(s)
+                self.log_file.flush()
+            except Exception:
+                pass
+        return res
+
+    def flush(self) -> None:
+        self.original.flush()
+        if self.log_file:
+            try:
+                self.log_file.flush()
+            except Exception:
+                pass
+
+    def isatty(self) -> bool:
+        return getattr(self.original, "isatty", lambda: False)()
+
+    def fileno(self) -> int:
+        return self.original.fileno()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.original, name)
+
+
+def setup_log_file(log_path_str: str, overwrite: bool = False, append: bool = False) -> Any:
+    """Open log file with user conflict resolution if file exists."""
+    log_path = Path(log_path_str).expanduser().resolve()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    mode = "w"
+    if log_path.exists() and log_path.stat().st_size > 0:
+        if overwrite:
+            mode = "w"
+        elif append:
+            mode = "a"
+        else:
+            print(f"\n[!] Log file already exists: {log_path}", flush=True)
+            while True:
+                print("Choose action:", flush=True)
+                print("  [1] Overwrite / replace existing file", flush=True)
+                print("  [2] Append to existing file", flush=True)
+                print("  [3] Abort / cancel test", flush=True)
+                try:
+                    choice = input("Enter choice [1/2/3] (or o/a/c): ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    print("\nAborted.")
+                    sys.exit(0)
+
+                if choice in ("1", "o", "overwrite", "replace", "w", "з", "заменить", "delete", "d"):
+                    mode = "w"
+                    break
+                elif choice in ("2", "a", "append", "д", "добавить"):
+                    mode = "a"
+                    break
+                elif choice in ("3", "c", "cancel", "abort", "q", "quit", "n", "no", "п", "прервать", ""):
+                    print("Test aborted by user.")
+                    sys.exit(0)
+                else:
+                    print(f"Invalid choice '{choice}'. Please enter 1, 2, or 3.")
+
+    f = open(log_path, mode, encoding="utf-8", buffering=1)
+    if mode == "a":
+        f.write(f"\n--- Resumed at {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+        f.flush()
+    return f
+
 
 # ---------------------------------------------------------------------------
 # Config / keys
@@ -372,6 +465,7 @@ class ModelTarget:
     api_format: str = "openai"  # "openai" | "cohere-v2" | "anthropic"
     thinking_budget: int | None = None
     reasoning_effort: str | None = None
+    reasoning_max_tokens: int | None = None
     sleep: float = DEFAULT_CASE_SLEEP_S  # post-case barrier sleep (rate limits)
     json_object: bool = False  # response_format json_object when supported
     headers: dict[str, str] | None = None
@@ -488,6 +582,12 @@ def call_model(target: ModelTarget, msgs: list[dict[str, Any]], retries: int | N
                 body.pop("max_tokens", None)
         if target.reasoning_effort:
             body["reasoning_effort"] = target.reasoning_effort
+        if (
+            target.reasoning_max_tokens
+            and target.reasoning_max_tokens > 0
+            and not is_groq
+        ):
+            body["reasoning"] = {"max_tokens": int(target.reasoning_max_tokens)}
         if target.json_object:
             body["response_format"] = {"type": "json_object"}
         think_kw = nemotron_disable_thinking_kwargs(target.model)
@@ -781,6 +881,49 @@ def select_cases(suite: str) -> list[tuple[str, str, str]]:
     return cases
 
 
+def find_start_case_index(cases: list[tuple[int, str, str, str]], spec: str) -> int:
+    """Find 0-based index in cases list matching spec (1-based case number or ID/label substring)."""
+    s = spec.strip()
+    if not s:
+        return 0
+
+    # 1. Exact match on full label, ID prefix (before ':'), or case-insensitive ID match
+    for idx, (_, label, _, _) in enumerate(cases):
+        case_id = label.split(":")[0].strip()
+        if s == label or s == case_id:
+            return idx
+        if s.lower() == label.lower() or s.lower() == case_id.lower():
+            return idx
+
+    # 2. Match by original 1-based case number (e.g. '66', '066') or 1-based index
+    if s.isdigit():
+        val = int(s)
+        # Check matching original case number
+        for idx, (num, _, _, _) in enumerate(cases):
+            if num == val:
+                return idx
+        # Check 1-based position in filtered list
+        if 1 <= val <= len(cases):
+            return val - 1
+        sys.exit(
+            f"--from-case index {val} not found in available cases (valid range: 1..{len(cases)})."
+        )
+
+    # 3. Prefix or substring match on label or ID
+    for idx, (_, label, _, _) in enumerate(cases):
+        if label.lower().startswith(s.lower()):
+            return idx
+    for idx, (_, label, _, _) in enumerate(cases):
+        if s.lower() in label.lower():
+            return idx
+
+    sample = ", ".join(c[1].split(":")[0] for c in cases[:5])
+    sys.exit(
+        f"--from-case '{spec}' not found in loaded cases.\n"
+        f"Provide a 1-based number or case ID (e.g. {sample})."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Multi-model runner: fan-out per case, barrier, next case
 # ---------------------------------------------------------------------------
@@ -788,8 +931,9 @@ def select_cases(suite: str) -> list[tuple[str, str, str]]:
 def run_multi(
     targets: list[ModelTarget],
     system_prompt: str,
-    cases: list[tuple[str, str, str]],
+    cases: list[tuple[int, str, str, str]],
     suite_name: str,
+    total_cases: int | None = None,
 ) -> dict[str, Any]:
     """
     For each case:
@@ -799,11 +943,18 @@ def run_multi(
     """
     n_models = len(targets)
     n_cases = len(cases)
+    n_total = total_cases if total_cases is not None else n_cases
     print(f"\n{'=' * 78}", flush=True)
-    print(
-        f"MULTI-MODEL gate-suite [{suite_name}] | models={n_models} | cases={n_cases}",
-        flush=True,
-    )
+    if n_cases < n_total:
+        print(
+            f"MULTI-MODEL gate-suite [{suite_name}] | models={n_models} | cases={n_cases} of {n_total} (start at #{cases[0][0]})",
+            flush=True,
+        )
+    else:
+        print(
+            f"MULTI-MODEL gate-suite [{suite_name}] | models={n_models} | cases={n_cases}",
+            flush=True,
+        )
     print(
         "  mode: per-case fan-out → all models parallel → barrier → next case",
         flush=True,
@@ -812,6 +963,10 @@ def run_multi(
         extra = ""
         if t.api_format == "cohere-v2":
             extra = f" format=cohere-v2 thinking_budget={t.thinking_budget}"
+        elif t.reasoning_max_tokens:
+            extra = f" reasoning.max_tokens={t.reasoning_max_tokens}"
+        if t.reasoning_effort:
+            extra += f" reasoning_effort={t.reasoning_effort}"
         print(
             f"  • {t.label}  max_tokens={t.max_tokens} timeout={t.timeout}s "
             f"sleep={t.sleep}s{extra}",
@@ -825,12 +980,12 @@ def run_multi(
 
     # Thread pool sized to number of models (one worker per model per case)
     with ThreadPoolExecutor(max_workers=max(1, n_models), thread_name_prefix="gate") as pool:
-        for i, (label, gold, uc) in enumerate(cases, 1):
+        for step_i, (case_num, label, gold, uc) in enumerate(cases, 1):
             msgs = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": uc},
             ]
-            print(f"\n  [{i:03d}/{n_cases}] {label}  gold={gold}", flush=True)
+            print(f"\n  [{case_num:03d}/{n_total:03d}] {label}  gold={gold}", flush=True)
 
             # --- fan-out: submit all models at once ---
             futures = {
@@ -868,7 +1023,7 @@ def run_multi(
                 )
 
             case_rows.append({
-                "n": i,
+                "n": case_num,
                 "label": label,
                 "gold": gold,
                 "by_model": case_by_model,
@@ -877,7 +1032,7 @@ def run_multi(
             # post-case sleep: use the max configured sleep among targets
             # (rate-limit fairness — still one sleep after the barrier)
             sleep_s = max((t.sleep for t in targets), default=0.0)
-            if sleep_s > 0 and i < n_cases:
+            if sleep_s > 0 and step_i < n_cases:
                 time.sleep(sleep_s)
 
     # --- scoreboard ---
@@ -928,11 +1083,12 @@ def run_multi(
 def run_single(
     target: ModelTarget,
     system_prompt: str,
-    cases: list[tuple[str, str, str]],
+    cases: list[tuple[int, str, str, str]],
     suite_name: str,
+    total_cases: int | None = None,
 ) -> list[dict[str, Any]]:
     """Single-model sequential path (same barrier semantics with n=1)."""
-    out = run_multi([target], system_prompt, cases, suite_name)
+    out = run_multi([target], system_prompt, cases, suite_name, total_cases=total_cases)
     return out["by_model"][target.label]
 
 
@@ -947,6 +1103,7 @@ def build_target(
     timeout_override: int | None,
     sleep: float,
     reasoning_effort: str | None,
+    reasoning_max_tokens_override: int | None,
     key_override: str | None,
 ) -> ModelTarget:
     tier = _providers.get(provider)
@@ -972,6 +1129,19 @@ def build_target(
         reff = tier.get("reasoning_effort") or tier.get("reasoningEffort") or None
         if reff is not None:
             reff = str(reff)
+    rmt = reasoning_max_tokens_override
+    if rmt is None:
+        rmt = tier.get("reasoningMaxTokens")
+        if rmt is None:
+            nested = tier.get("reasoning")
+            if isinstance(nested, dict):
+                rmt = nested.get("max_tokens")
+            else:
+                rmt = tier.get("reasoning_max_tokens")
+    if rmt is not None:
+        rmt = int(rmt)
+        if rmt <= 0:
+            rmt = None
     headers = tier.get("headers")
     if not isinstance(headers, dict):
         headers = None
@@ -985,6 +1155,7 @@ def build_target(
         api_format=api_format,
         thinking_budget=thinking_budget,
         reasoning_effort=reff,
+        reasoning_max_tokens=rmt,
         sleep=float(sleep),
         json_object=json_object,
         headers=headers,
@@ -1016,6 +1187,11 @@ Examples:
   %(prog)s --providers groq-qwen36-27b,together-bonsai-27b --suite balanced18
   %(prog)s --all-providers --suite hard10
   %(prog)s --providers 1 --suite balanced18 --sleep 0
+  %(prog)s --providers 1 --from-case 45
+  %(prog)s --providers 1 --from-case dp-07
+  %(prog)s --providers 1 --log /tmp/my_test.log
+  %(prog)s --providers 1 --overwrite
+  %(prog)s --providers 1 --append
 """,
     )
     g = ap.add_mutually_exclusive_group(required=False)
@@ -1039,6 +1215,9 @@ Examples:
                     help="seconds after each case barrier for ALL models (use 0 to disable)")
     ap.add_argument("--reasoning-effort", default=None,
                     help="reasoning_effort param for OpenAI-compatible targets")
+    ap.add_argument("--reasoning-max-tokens", type=int, default=None,
+                    help="OpenRouter-style reasoning.max_tokens CoT budget "
+                         "(overrides tier reasoning.max_tokens / reasoningMaxTokens)")
     ap.add_argument("--key", default=None,
                     help="explicit API key (valid when a single provider is selected)")
     ap.add_argument("--exclude", default=None,
@@ -1056,6 +1235,16 @@ Examples:
                     help="path to alternate agent-reviewer.json (override default config path)")
     ap.add_argument("--cases", default=None,
                     help="comma-separated case IDs to run (e.g., 'dp-07,di-01,si-01')")
+    ap.add_argument("--from-case", "--start-from", "--start-case", default=None,
+                    help="start testing from a specific case (1-based number e.g. '45' or case ID e.g. 'dp-07')")
+    ap.add_argument("--log", default="/tmp/gate-unified.log",
+                    help="path to log file (default: /tmp/gate-unified.log; use --no-log to disable)")
+    ap.add_argument("--no-log", action="store_true", default=False,
+                    help="disable logging to file")
+    ap.add_argument("--overwrite", action="store_true", default=False,
+                    help="overwrite existing log file without interactive prompt")
+    ap.add_argument("--append", action="store_true", default=False,
+                    help="append to existing log file without interactive prompt")
     args = ap.parse_args()
 
     # Override config path if --config given
@@ -1064,16 +1253,25 @@ Examples:
         _cfg_path = Path(args.config)
         if not _cfg_path.is_file():
             sys.exit(f"--config path not found: {_cfg_path}")
-        print(f"using config: {_cfg_path}", flush=True)
-
-    load_providers()
 
     if args.list_providers:
+        load_providers()
         print_providers_list()
         return
 
     if not args.providers and not args.all_providers:
         ap.error("one of the arguments --providers, --all-providers, or --list is required")
+
+    log_fp = None
+    if not args.no_log and args.log and args.log.lower() not in ("none", "off", "no", "false", ""):
+        log_fp = setup_log_file(args.log, overwrite=args.overwrite, append=args.append)
+        sys.stdout = TeeStream(sys.stdout, log_fp)
+        sys.stderr = TeeStream(sys.stderr, log_fp)
+
+    if args.config:
+        print(f"using config: {_cfg_path}", flush=True)
+
+    load_providers()
 
     global _retry_sleep_s, _max_retries
     if args.retry_sleep < 0:
@@ -1116,6 +1314,7 @@ Examples:
             timeout_override=args.timeout,
             sleep=args.sleep,
             reasoning_effort=args.reasoning_effort,
+            reasoning_max_tokens_override=args.reasoning_max_tokens,
             key_override=args.key if is_single else None,
         )
         for n in names
@@ -1124,27 +1323,27 @@ Examples:
     print(f"targets: {', '.join(t.label for t in targets)}", flush=True)
     print(f"suite={args.suite}  sleep_after_case={args.sleep}s", flush=True)
 
-    cases = select_cases(args.suite)
-    
+    cases_raw = select_cases(args.suite)
+    total_suite_cases = len(cases_raw)
+    cases: list[tuple[int, str, str, str]] = [
+        (i, label, gold, uc) for i, (label, gold, uc) in enumerate(cases_raw, 1)
+    ]
+
     # Filter by --cases if given (comma-separated IDs)
     if args.cases:
         case_ids = {c.strip() for c in args.cases.split(",") if c.strip()}
         print(f"--cases filter: {len(case_ids)} IDs", flush=True)
         before = len(cases)
         # Match by prefix (case ID format is 'id:category', user may pass just 'id')
-        cases = [c for c in cases if c[0].split(":")[0] in case_ids or c[0] in case_ids]
-        matched_ids = {c[0].split(":")[0] for c in cases}
+        cases = [c for c in cases if c[1].split(":")[0] in case_ids or c[1] in case_ids]
+        matched_ids = {c[1].split(":")[0] for c in cases}
         missing = case_ids - matched_ids
         if missing:
             sys.exit(f"--cases IDs not found in suite: {sorted(missing)}")
         print(f"--cases kept {len(cases)}/{before} cases", flush=True)
         if not cases:
             sys.exit("no cases matched --cases filter")
-    
-    if args.limit is not None:
-        if args.limit < 1:
-            sys.exit("--limit must be >= 1")
-        cases = cases[: args.limit]
+
     if args.filter_labels:
         raw = args.filter_labels.strip()
         if Path(raw).is_file():
@@ -1158,18 +1357,31 @@ Examples:
             keep = {x.strip() for x in raw.split(",") if x.strip()}
             print(f"filter-labels: {len(keep)} labels", flush=True)
         before = len(cases)
-        cases = [c for c in cases if c[0] in keep]
-        missing = keep - {c[0] for c in cases}
+        cases = [c for c in cases if c[1] in keep]
+        missing = keep - {c[1] for c in cases}
         if missing:
             print(f"note: {len(missing)} filter labels not found in suite "
                   f"(e.g. {sorted(missing)[:3]})", flush=True)
         print(f"filter-labels kept {len(cases)}/{before} cases", flush=True)
         if not cases:
             sys.exit("no cases left after --filter-labels")
+
+    if args.from_case:
+        start_idx = find_start_case_index(cases, args.from_case)
+        start_num = cases[start_idx][0]
+        start_label = cases[start_idx][1]
+        cases = cases[start_idx:]
+        print(f"--from-case: starting from #{start_num}/{total_suite_cases} ({start_label}), {len(cases)} remaining", flush=True)
+
+    if args.limit is not None:
+        if args.limit < 1:
+            sys.exit("--limit must be >= 1")
+        cases = cases[: args.limit]
     print(f"cases loaded: {len(cases)}"
+          + (f" of {total_suite_cases}" if len(cases) < total_suite_cases else "")
           + (f" (limit={args.limit})" if args.limit else ""), flush=True)
 
-    payload = run_multi(targets, sp, cases, args.suite)
+    payload = run_multi(targets, sp, cases, args.suite, total_cases=total_suite_cases)
 
     # output path
     ts = time.strftime("%Y%m%d_%H%M%S")
@@ -1179,11 +1391,35 @@ Examples:
         out = Path(f"/tmp/gate_unified_{t.name}_{safe}_{args.suite}_{ts}.json")
         # keep single-model flat list for backward compat
         out.write_text(json.dumps(payload["by_model"][t.label], indent=2))
+        print(f"\nSaved: {out}", flush=True)
     else:
-        names_safe = "-".join(t.name for t in targets)
-        out = Path(f"/tmp/gate_unified_multi_{names_safe}_{args.suite}_{ts}.json")
-        out.write_text(json.dumps(payload, indent=2))
-    print(f"\nSaved: {out}", flush=True)
+        # Multi-model: write per-model reports + aggregate summary
+        out_files = []
+        for t in targets:
+            safe = t.model.replace("/", "-").replace(":", "-")
+            out = Path(f"/tmp/gate_unified_{t.name}_{safe}_{args.suite}_{ts}.json")
+            out.write_text(json.dumps(payload["by_model"][t.label], indent=2))
+            out_files.append(out)
+            print(f"Saved: {out}", flush=True)
+        
+        # Aggregate summary: scoreboard + disagreements only (no full case data)
+        summary = {
+            "suite": payload["suite"],
+            "mode": payload["mode"],
+            "models": payload["models"],
+            "n_cases": payload["n_cases"],
+            "scores": payload["scores"],
+            "disagreements": payload["disagreements"],
+        }
+        summary_out = Path(f"/tmp/gate_unified_multi_summary_{args.suite}_{ts}.json")
+        summary_out.write_text(json.dumps(summary, indent=2))
+        print(f"Saved aggregate summary: {summary_out}", flush=True)
+    if log_fp:
+        try:
+            log_fp.flush()
+            log_fp.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

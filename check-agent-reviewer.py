@@ -324,6 +324,21 @@ def build_request_parts(
     if not is_cohere_v2 and isinstance(reasoning_effort, str) and reasoning_effort:
         body["reasoning_effort"] = reasoning_effort
 
+    reasoning_max = tier_cfg.get("reasoningMaxTokens")
+    if reasoning_max is None:
+        nested = tier_cfg.get("reasoning")
+        if isinstance(nested, dict):
+            reasoning_max = nested.get("max_tokens")
+        else:
+            reasoning_max = tier_cfg.get("reasoning_max_tokens")
+    if (
+        not is_cohere_v2
+        and not is_groq
+        and isinstance(reasoning_max, (int, float))
+        and reasoning_max > 0
+    ):
+        body["reasoning"] = {"max_tokens": int(reasoning_max)}
+
     return url, body, merge_headers(api_key, tier_cfg)
 
 

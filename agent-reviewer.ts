@@ -296,11 +296,17 @@ type TierConfig = {
 	/** Cohere v2 only: thinking token budget (limits reasoning tokens). */
 	thinkingBudget?: number;
 	/**
-	 * OpenAI-compatible `reasoning_effort` (e.g. "none" | "low" | "medium" | "high").
-	 * Used for Groq qwen3.6 / gpt-oss etc. Omitted from body if unset.
-	 * Config key may be `reasoningEffort` or `reasoning_effort`.
-	 */
-	reasoningEffort?: string;
+		 * OpenAI-compatible `reasoning_effort` (e.g. "none" | "low" | "medium" | "high").
+		 * Used for Groq qwen3.6 / gpt-oss etc. Omitted from body if unset.
+		 * Config key may be `reasoningEffort` or `reasoning_effort`.
+		 */
+		reasoningEffort?: string;
+		/**
+		 * OpenRouter-style reasoning token budget: body.reasoning.max_tokens.
+		 * Caps CoT on models that cannot disable thinking (MiniMax M2.x).
+		 * Config: `reasoningMaxTokens` or nested `reasoning.max_tokens`.
+		 */
+		reasoningMaxTokens?: number;
 	/**
 	 * Extra HTTP headers merged after the plugin defaults
 	 * (Content-Type, Authorization, User-Agent, Cohere Accept).
@@ -552,6 +558,23 @@ function normalizeTier(raw: unknown, forcedName?: string): TierConfig | null {
 					? t.reasoning_effort
 					: "";
 		if (re.trim().length > 0) out.reasoningEffort = re.trim();
+	}
+	{
+		const nested =
+			typeof t.reasoning === "object" &&
+			t.reasoning !== null &&
+			!Array.isArray(t.reasoning)
+				? (t.reasoning as Record<string, unknown>).max_tokens
+				: undefined;
+		const rmt =
+			typeof t.reasoningMaxTokens === "number"
+				? t.reasoningMaxTokens
+				: typeof t.reasoning_max_tokens === "number"
+					? t.reasoning_max_tokens
+					: typeof nested === "number"
+						? nested
+						: 0;
+		if (rmt > 0) out.reasoningMaxTokens = rmt;
 	}
 	if (Array.isArray(t.fallbackModels)) {
 		const fb = t.fallbackModels
@@ -1185,6 +1208,14 @@ async function callReviewerOnce(
 		) {
 			body.reasoning_effort = tier.reasoningEffort;
 		}
+		if (
+			!isCohereV2 &&
+			!isGroq &&
+			typeof tier.reasoningMaxTokens === "number" &&
+			tier.reasoningMaxTokens > 0
+		) {
+			body.reasoning = { max_tokens: tier.reasoningMaxTokens };
+		}
 		// Nemotron 3 Super / 3.5 Lightning: /no_think is ignored; official off-switch.
 		const thinkKw = nemotronDisableThinkingKwargs(model);
 		if (!isCohereV2 && thinkKw) {
@@ -1201,6 +1232,7 @@ async function callReviewerOnce(
 		max_tokens: body.max_tokens ?? body.max_completion_tokens,
 		thinkingBudget: isCohereV2 ? tier.thinkingBudget : undefined,
 		reasoning_effort: body.reasoning_effort,
+		reasoning_max_tokens: tier.reasoningMaxTokens,
 		jsonObject: tier.jsonObject === true,
 		noThink: isNemotronModel(model),
 		enableThinking:

@@ -191,10 +191,10 @@ in `~/.config/kilo/agent-reviewer.json` (`chmod 600`); that file is gitignored.
 | `mistral-codestral` | api.mistral.ai/v1 | `codestral-2508` | 8000 | 256 | false | |
 | `together-bonsai-27b` | api.together.ai/v1 | `Prism-ML/Ternary-Bonsai-27B` | 8000 | 512 | **true** | pos 5 in `order` |
 | `mistral-ministral-8b` | api.mistral.ai/v1 | `ministral-8b-2512` | 8000 | 256 | false | |
-| `groq-gpt-oss-20b` | api.groq.com/openai/v1 | `openai/gpt-oss-20b` | 8000 | 256 | false | `reasoning_effort: low` |
+| `groq-gpt-oss-20b` | api.groq.com/openai/v1 | `openai/gpt-oss-20b` | 8000 | 512 | false | `reasoning_effort: low` (Groq rejects `none`; CoT counts toward max_tokens) |
 | `cohere` | api.cohere.com/v2 | `command-a-plus-05-2026` | 8000 | 512 | false | `apiFormat: cohere-v2` |
 | `xiaomi-mimo` | token-plan-sgp.xiaomimimo.com/v1 | `mimo-v2.5` | 30000 | 256 | **true** | last fallback |
-| `kirocc-qwen3-coder-next` | `http://127.0.0.1:3456/v1` | `qwen3-coder-next` | 8000 | 128 | false | local Anthropic proxy; **not** in default `order`; **108/108 (100%) FA0 FE0** on extended suite |
+| `kirocc-qwen3-coder-next` | `http://127.0.0.1:3456/v1` | `qwen3-coder-next` | 8000 | 128 | false | local Anthropic proxy; **not** in default `order`; **102/108 (94.4%) FA2 FE4**, avg ~2036ms on extended suite |
 
 Live chain: **Ollama gemma4:31b → Groq Qwen 3.6 → Laguna →
 Codestral → Together Bonsai → Ministral-8B → Groq gpt-oss-20b →
@@ -247,6 +247,7 @@ type TierConfig = {
   apiFormat?: "openai" | "cohere-v2" | "anthropic" // default "openai"
   thinkingBudget?: number // cohere-v2 only
   reasoningEffort?: string
+  reasoningMaxTokens?: number // OpenRouter-style body.reasoning.max_tokens (MiniMax M2.x CoT cap)
   headers?: Record<string, string> // merged after defaults; tier wins
 }
 ```

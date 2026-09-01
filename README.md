@@ -140,6 +140,7 @@ Per tier: `baseURL`, `model`, `apiKey` **or** `apiKeyEnv`,
 optional `timeoutMs` (8000), `maxTokens` (512),
 `jsonObject` (false), `apiFormat` (`openai` by default;
 `cohere-v2`/`anthropic`), `thinkingBudget`, `reasoningEffort`,
+`reasoningMaxTokens` / `reasoning.max_tokens` (OpenRouter CoT budget),
 `fallbackModels`, `headers` (`Record<string, string>`).
 
 `headers` are merged after the plugin defaults
