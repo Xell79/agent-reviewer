@@ -42,6 +42,7 @@ Key reading from ~/.config/kilo/agent-reviewer.json unless --key given (single t
 Output: /tmp/gate_unified_multi_<names>_<suite>_<timestamp>.json (multi) or
         /tmp/gate_unified_<provider>_<model>_<suite>_<timestamp>.json (single)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -60,6 +61,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 # Logging / stdout tee
 # ---------------------------------------------------------------------------
+
 
 class TeeStream:
     """Mirrors stream writes to both the original stream and a log file."""
@@ -96,7 +98,25 @@ class TeeStream:
         return getattr(self.original, name)
 
 
-def setup_log_file(log_path_str: str, overwrite: bool = False, append: bool = False) -> Any:
+def backup_log_file(log_path: Path) -> Path | None:
+    """Rename existing non-empty log file to <log_path>.<timestamp>.bak."""
+    if not log_path.exists() or log_path.stat().st_size == 0:
+        return None
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    bak = Path(f"{log_path}.{ts}.bak")
+    if bak.exists():
+        counter = 1
+        while Path(f"{log_path}.{ts}_{counter}.bak").exists():
+            counter += 1
+        bak = Path(f"{log_path}.{ts}_{counter}.bak")
+    log_path.rename(bak)
+    print(f"Existing log backed up to: {bak}", flush=True)
+    return bak
+
+
+def setup_log_file(
+    log_path_str: str, overwrite: bool = False, append: bool = False
+) -> Any:
     """Open log file with user conflict resolution if file exists."""
     log_path = Path(log_path_str).expanduser().resolve()
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -104,6 +124,7 @@ def setup_log_file(log_path_str: str, overwrite: bool = False, append: bool = Fa
     mode = "w"
     if log_path.exists() and log_path.stat().st_size > 0:
         if overwrite:
+            backup_log_file(log_path)
             mode = "w"
         elif append:
             mode = "a"
@@ -111,7 +132,10 @@ def setup_log_file(log_path_str: str, overwrite: bool = False, append: bool = Fa
             print(f"\n[!] Log file already exists: {log_path}", flush=True)
             while True:
                 print("Choose action:", flush=True)
-                print("  [1] Overwrite / replace existing file", flush=True)
+                print(
+                    "  [1] Overwrite / replace existing file (backs up previous log to .bak)",
+                    flush=True,
+                )
                 print("  [2] Append to existing file", flush=True)
                 print("  [3] Abort / cancel test", flush=True)
                 try:
@@ -120,13 +144,36 @@ def setup_log_file(log_path_str: str, overwrite: bool = False, append: bool = Fa
                     print("\nAborted.")
                     sys.exit(0)
 
-                if choice in ("1", "o", "overwrite", "replace", "w", "з", "заменить", "delete", "d"):
+                if choice in (
+                    "1",
+                    "o",
+                    "overwrite",
+                    "replace",
+                    "w",
+                    "з",
+                    "заменить",
+                    "delete",
+                    "d",
+                ):
+                    backup_log_file(log_path)
                     mode = "w"
                     break
                 elif choice in ("2", "a", "append", "д", "добавить"):
                     mode = "a"
                     break
-                elif choice in ("3", "c", "cancel", "abort", "q", "quit", "n", "no", "п", "прервать", ""):
+                elif choice in (
+                    "3",
+                    "c",
+                    "cancel",
+                    "abort",
+                    "q",
+                    "quit",
+                    "n",
+                    "no",
+                    "п",
+                    "прервать",
+                    "",
+                ):
                     print("Test aborted by user.")
                     sys.exit(0)
                 else:
@@ -143,8 +190,12 @@ def setup_log_file(log_path_str: str, overwrite: bool = False, append: bool = Fa
 # Config / keys
 # ---------------------------------------------------------------------------
 
-_cfg_path = Path(os.environ.get("AGENT_REVIEWER_CONFIG",
-                                os.path.expanduser("~/.config/kilo/agent-reviewer.json")))
+_cfg_path = Path(
+    os.environ.get(
+        "AGENT_REVIEWER_CONFIG",
+        os.path.expanduser("~/.config/kilo/agent-reviewer.json"),
+    )
+)
 SCRIPT_DIR = Path(__file__).resolve().parent
 HARD10_GOLD = SCRIPT_DIR / "gate_hard10_gold.json"
 BALANCED18_GOLD = SCRIPT_DIR / "gate_balanced18_gold.json"
@@ -230,7 +281,11 @@ def print_providers_list() -> None:
     for idx, name in enumerate(_provider_index, start=1):
         t = _providers[name]
         model = t.get("model", "unknown")
-        in_order = f"(active order #{_order.index(name) + 1})" if name in _order else "(research / not in active order)"
+        in_order = (
+            f"(active order #{_order.index(name) + 1})"
+            if name in _order
+            else "(research / not in active order)"
+        )
         print(f"  [{idx:2d}] {name:<26} [model: {model}] {in_order}")
     print()
 
@@ -299,6 +354,7 @@ def get_key(provider: str, explicit: str | None) -> str:
 # Prompt extraction
 # ---------------------------------------------------------------------------
 
+
 def extract_system_prompt() -> str:
     """Read systemPrompt strictly from agent-reviewer.json. Exit if missing or empty."""
     if not _cfg_path.is_file():
@@ -319,6 +375,7 @@ def extract_system_prompt() -> str:
 # ---------------------------------------------------------------------------
 # Parser (bug-fixed, no `escale` typo)
 # ---------------------------------------------------------------------------
+
 
 def strip_fences(t: str) -> str:
     t = t.strip()
@@ -359,7 +416,7 @@ def extract_json_obj(text: str) -> str | None:
                 break
     if end < 0:
         return None
-    return c[s:end + 1]
+    return c[s : end + 1]
 
 
 def normalize(v: object) -> str | None:
@@ -368,7 +425,17 @@ def normalize(v: object) -> str | None:
     s = v.strip().lower()
     if s in ("approve", "allow", "yes", "ok", "safe"):
         return "approve"
-    if s in ("escalate", "deny", "no", "block", "reject", "unsafe", "review", "ask", "human"):
+    if s in (
+        "escalate",
+        "deny",
+        "no",
+        "block",
+        "reject",
+        "unsafe",
+        "review",
+        "ask",
+        "human",
+    ):
         return "escalate"
     return None
 
@@ -389,11 +456,13 @@ def parse(text: str):
         return m.group(1).lower(), "", "regex"
     tail = text[-400:]
     # NOTE: fixed bug — was `escale` (missing 'at'); caused false heuristic approve
-    if re.search(r"\b(decision\s*[:=]\s*)?escalate\b", tail) and \
-       not re.search(r"\bapprove\b", tail[-80:]):
+    if re.search(r"\b(decision\s*[:=]\s*)?escalate\b", tail) and not re.search(
+        r"\bapprove\b", tail[-80:]
+    ):
         return "escalate", "heuristic", "heuristic"
-    if re.search(r"\b(decision\s*[:=]\s*)?approve\b", tail) and \
-       not re.search(r"\bescalate\b", tail[-80:]):
+    if re.search(r"\b(decision\s*[:=]\s*)?approve\b", tail) and not re.search(
+        r"\bescalate\b", tail[-80:]
+    ):
         return "approve", "heuristic", "heuristic"
     return None, None, "none"
 
@@ -406,7 +475,9 @@ def extract_text(data: dict[str, Any]) -> str:
         parts = [
             str(item["text"])
             for item in ac
-            if isinstance(item, dict) and item.get("type") in (None, "text") and item.get("text")
+            if isinstance(item, dict)
+            and item.get("type") in (None, "text")
+            and item.get("text")
         ]
         if parts:
             return "".join(parts)
@@ -454,14 +525,15 @@ def extract_text(data: dict[str, Any]) -> str:
 # Target model descriptor
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ModelTarget:
-    name: str                 # provider/tier name
+    name: str  # provider/tier name
     model: str
     base_url: str
     key: str
     max_tokens: int
-    timeout: int              # seconds
+    timeout: int  # seconds
     api_format: str = "openai"  # "openai" | "cohere-v2" | "anthropic"
     thinking_budget: int | None = None
     reasoning_effort: str | None = None
@@ -509,7 +581,10 @@ def messages_for_model(model: str, msgs: list[dict[str, Any]]) -> list[dict[str,
 # API call
 # ---------------------------------------------------------------------------
 
-def call_model(target: ModelTarget, msgs: list[dict[str, Any]], retries: int | None = None) -> dict[str, Any]:
+
+def call_model(
+    target: ModelTarget, msgs: list[dict[str, Any]], retries: int | None = None
+) -> dict[str, Any]:
     """Call one model. Supports OpenAI-compatible, Anthropic, and Cohere v2.
 
     retries: max *retries* after the first attempt (not total attempts).
@@ -637,21 +712,26 @@ def call_model(target: ModelTarget, msgs: list[dict[str, Any]], retries: int | N
             if ttok is None and ptok is not None and ctok is not None:
                 ttok = ptok + ctok
             rtok = None
-            details = usage.get("completion_tokens_details") or usage.get("tokens") or {}
+            details = (
+                usage.get("completion_tokens_details") or usage.get("tokens") or {}
+            )
             if isinstance(details, dict):
                 rtok = details.get("reasoning_tokens") or details.get("thinking_tokens")
             result = {
-                "decision": d, "reason": reason, "method": method,
-                "ms": ms, "text": text, "finish": finish,
+                "decision": d,
+                "reason": reason,
+                "method": method,
+                "ms": ms,
+                "text": text,
+                "finish": finish,
                 "prompt_tokens": ptok,
                 "completion_tokens": ctok,
                 "total_tokens": ttok,
                 "reasoning_tokens": rtok,
             }
             # Treat truncated / unparsable responses as soft failures → retry.
-            soft_fail = (
-                d is None
-                or (isinstance(finish, str) and finish.lower() == "length")
+            soft_fail = d is None or (
+                isinstance(finish, str) and finish.lower() == "length"
             )
             if soft_fail and attempt < max_attempts - 1:
                 wait = _retry_sleep_s
@@ -720,10 +800,17 @@ def result_entry(label: str, gold: str, r: dict[str, Any]) -> dict[str, Any]:
     fa = decision == "approve" and gold == "escalate"
     fe = decision == "escalate" and gold == "approve"
     return {
-        "label": label, "gold": gold, "decision": decision,
-        "reason": (reason or "")[:120], "method": method,
-        "ms": r.get("ms", 0), "match": match, "fa": fa, "fe": fe,
-        "error": r.get("error"), "finish": r.get("finish"),
+        "label": label,
+        "gold": gold,
+        "decision": decision,
+        "reason": (reason or "")[:120],
+        "method": method,
+        "ms": r.get("ms", 0),
+        "match": match,
+        "fa": fa,
+        "fe": fe,
+        "error": r.get("error"),
+        "finish": r.get("finish"),
         "text": (r.get("text") or "")[:300],
         "prompt_tokens": r.get("prompt_tokens"),
         "completion_tokens": r.get("completion_tokens"),
@@ -749,21 +836,29 @@ def score_block(results: list[dict[str, Any]]) -> dict[str, Any]:
     correct = sum(1 for r in results if r["match"])
     fa_n = sum(1 for r in results if r["fa"])
     fe_n = sum(1 for r in results if r["fe"])
-    valid = [r for r in results if r.get("decision") != "error" and not (
-        r.get("error") and r.get("decision") == "error"
-    )]
+    valid = [
+        r
+        for r in results
+        if r.get("decision") != "error"
+        and not (r.get("error") and r.get("decision") == "error")
+    ]
     # treat explicit error decision as invalid
     valid = [r for r in results if r.get("decision") in ("approve", "escalate")]
     avg_ms = sum(r["ms"] for r in valid) / len(valid) if valid else 0
     json_n = sum(1 for r in valid if r["method"] == "json")
-    ctoks = [r["completion_tokens"] for r in valid if r["completion_tokens"] is not None]
+    ctoks = [
+        r["completion_tokens"] for r in valid if r["completion_tokens"] is not None
+    ]
     ptoks = [r["prompt_tokens"] for r in valid if r["prompt_tokens"] is not None]
     avg_ctok = sum(ctoks) / len(ctoks) if ctoks else 0
     avg_ptok = sum(ptoks) / len(ptoks) if ptoks else 0
     finish_len = sum(1 for r in valid if r.get("finish") == "length")
-    err_n = sum(1 for r in results if r.get("decision") == "error" or (
-        r.get("error") and r.get("decision") not in ("approve", "escalate")
-    ))
+    err_n = sum(
+        1
+        for r in results
+        if r.get("decision") == "error"
+        or (r.get("error") and r.get("decision") not in ("approve", "escalate"))
+    )
     return {
         "total": total,
         "correct": correct,
@@ -801,8 +896,10 @@ def print_score(prefix: str, s: dict[str, Any]) -> None:
 # Test cases
 # ---------------------------------------------------------------------------
 
-def build_user_msg(permission: str, patterns: list[str] | None = None,
-                   command: str | None = None) -> str:
+
+def build_user_msg(
+    permission: str, patterns: list[str] | None = None, command: str | None = None
+) -> str:
     parts = [f"permission: {permission}"]
     if patterns:
         parts.append(f"patterns: {json.dumps(patterns)}")
@@ -928,6 +1025,7 @@ def find_start_case_index(cases: list[tuple[int, str, str, str]], spec: str) -> 
 # Multi-model runner: fan-out per case, barrier, next case
 # ---------------------------------------------------------------------------
 
+
 def run_multi(
     targets: list[ModelTarget],
     system_prompt: str,
@@ -979,18 +1077,20 @@ def run_multi(
     case_rows: list[dict[str, Any]] = []
 
     # Thread pool sized to number of models (one worker per model per case)
-    with ThreadPoolExecutor(max_workers=max(1, n_models), thread_name_prefix="gate") as pool:
+    with ThreadPoolExecutor(
+        max_workers=max(1, n_models), thread_name_prefix="gate"
+    ) as pool:
         for step_i, (case_num, label, gold, uc) in enumerate(cases, 1):
             msgs = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": uc},
             ]
-            print(f"\n  [{case_num:03d}/{n_total:03d}] {label}  gold={gold}", flush=True)
+            print(
+                f"\n  [{case_num:03d}/{n_total:03d}] {label}  gold={gold}", flush=True
+            )
 
             # --- fan-out: submit all models at once ---
-            futures = {
-                pool.submit(call_model, t, msgs): t for t in targets
-            }
+            futures = {pool.submit(call_model, t, msgs): t for t in targets}
 
             # --- barrier: collect every future before next case ---
             raw_by_label: dict[str, dict[str, Any]] = {}
@@ -1022,12 +1122,14 @@ def run_multi(
                     flush=True,
                 )
 
-            case_rows.append({
-                "n": case_num,
-                "label": label,
-                "gold": gold,
-                "by_model": case_by_model,
-            })
+            case_rows.append(
+                {
+                    "n": case_num,
+                    "label": label,
+                    "gold": gold,
+                    "by_model": case_by_model,
+                }
+            )
 
             # post-case sleep: use the max configured sleep among targets
             # (rate-limit fairness — still one sleep after the barrier)
@@ -1055,15 +1157,22 @@ def run_multi(
             if e["decision"] in ("approve", "escalate")
         }
         if len(set(decisions.values())) > 1:
-            disagreements.append({
-                "label": row["label"],
-                "gold": row["gold"],
-                "decisions": decisions,
-            })
+            disagreements.append(
+                {
+                    "label": row["label"],
+                    "gold": row["gold"],
+                    "decisions": decisions,
+                }
+            )
     if disagreements:
-        print(f"\n  DISAGREEMENTS ({len(disagreements)} cases where models split):", flush=True)
+        print(
+            f"\n  DISAGREEMENTS ({len(disagreements)} cases where models split):",
+            flush=True,
+        )
         for d in disagreements[:30]:
-            parts = " | ".join(f"{m.split('/')[0]}={dec}" for m, dec in d["decisions"].items())
+            parts = " | ".join(
+                f"{m.split('/')[0]}={dec}" for m, dec in d["decisions"].items()
+            )
             print(f"    {d['label']:40s} gold={d['gold']:8s}  {parts}", flush=True)
         if len(disagreements) > 30:
             print(f"    ... +{len(disagreements) - 30} more", flush=True)
@@ -1096,6 +1205,7 @@ def run_single(
 # Target construction from CLI / config
 # ---------------------------------------------------------------------------
 
+
 def build_target(
     provider: str,
     model_override: str | None,
@@ -1117,7 +1227,11 @@ def build_target(
         sys.exit(f"no model for provider '{provider}' (pass --model or set in config)")
     max_tokens = max_tokens_override or tier.get("maxTokens") or 512
     timeout_ms = tier.get("timeoutMs") or 8000
-    timeout = timeout_override if timeout_override is not None else max(1, int(timeout_ms) // 1000)
+    timeout = (
+        timeout_override
+        if timeout_override is not None
+        else max(1, int(timeout_ms) // 1000)
+    )
     api_format = tier.get("apiFormat") or "openai"
     thinking_budget = tier.get("thinkingBudget")
     if thinking_budget is not None:
@@ -1166,7 +1280,10 @@ def build_target(
 # Main
 # ---------------------------------------------------------------------------
 
-class HelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
+
+class HelpFormatter(
+    argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter
+):
     pass
 
 
@@ -1195,56 +1312,137 @@ Examples:
 """,
     )
     g = ap.add_mutually_exclusive_group(required=False)
-    g.add_argument("--list-providers", "--list", action="store_true", default=False,
-                   help="list all available providers with 1-based numbers and exit")
-    g.add_argument("--providers", default=None,
-                   help="comma-separated provider names, 1-based numbers, or ranges (e.g. '1,3', '1-4', 'groq-qwen36-27b')")
-    g.add_argument("--all-providers", action="store_true", default=False,
-                   help="run all enabled tiers from config order")
+    g.add_argument(
+        "--list-providers",
+        "--list",
+        action="store_true",
+        default=False,
+        help="list all available providers with 1-based numbers and exit",
+    )
+    g.add_argument(
+        "--providers",
+        default=None,
+        help="comma-separated provider names, 1-based numbers, or ranges (e.g. '1,3', '1-4', 'groq-qwen36-27b')",
+    )
+    g.add_argument(
+        "--all-providers",
+        action="store_true",
+        default=False,
+        help="run all enabled tiers from config order",
+    )
 
-    ap.add_argument("--model", default=None,
-                    help="model id override (valid when a single provider is selected; multi uses config models)")
-    ap.add_argument("--suite", default="extended",
-                    choices=["extended", "balanced18", "hard10", "all"],
-                    help="test suite: extended (108 categorized), balanced18, hard10, all")
-    ap.add_argument("--max-tokens", type=int, default=None,
-                    help="override max_tokens for all targets (default: per-tier config)")
-    ap.add_argument("--timeout", type=int, default=None,
-                    help="override timeout seconds for all targets (default: per-tier config)")
-    ap.add_argument("--sleep", type=float, default=DEFAULT_CASE_SLEEP_S,
-                    help="seconds after each case barrier for ALL models (use 0 to disable)")
-    ap.add_argument("--reasoning-effort", default=None,
-                    help="reasoning_effort param for OpenAI-compatible targets")
-    ap.add_argument("--reasoning-max-tokens", type=int, default=None,
-                    help="OpenRouter-style reasoning.max_tokens CoT budget "
-                         "(overrides tier reasoning.max_tokens / reasoningMaxTokens)")
-    ap.add_argument("--key", default=None,
-                    help="explicit API key (valid when a single provider is selected)")
-    ap.add_argument("--exclude", default=None,
-                    help="comma-separated provider names or numbers to skip (with --all-providers)")
-    ap.add_argument("--limit", type=int, default=None,
-                    help="run only first N cases of the selected suite (smoke)")
-    ap.add_argument("--filter-labels", default=None,
-                    help="comma-separated case labels to keep (exact match), "
-                         "or path to a text file with one label per line")
-    ap.add_argument("--retry-sleep", type=float, default=DEFAULT_RETRY_SLEEP_S,
-                    help="seconds to wait before retrying after timeout/HTTP error")
-    ap.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES,
-                    help="max retries per case after first attempt (total attempts = 1 + this)")
-    ap.add_argument("--config", default=None,
-                    help="path to alternate agent-reviewer.json (override default config path)")
-    ap.add_argument("--cases", default=None,
-                    help="comma-separated case IDs to run (e.g., 'dp-07,di-01,si-01')")
-    ap.add_argument("--from-case", "--start-from", "--start-case", default=None,
-                    help="start testing from a specific case (1-based number e.g. '45' or case ID e.g. 'dp-07')")
-    ap.add_argument("--log", default="/tmp/gate-unified.log",
-                    help="path to log file (default: /tmp/gate-unified.log; use --no-log to disable)")
-    ap.add_argument("--no-log", action="store_true", default=False,
-                    help="disable logging to file")
-    ap.add_argument("--overwrite", action="store_true", default=False,
-                    help="overwrite existing log file without interactive prompt")
-    ap.add_argument("--append", action="store_true", default=False,
-                    help="append to existing log file without interactive prompt")
+    ap.add_argument(
+        "--model",
+        default=None,
+        help="model id override (valid when a single provider is selected; multi uses config models)",
+    )
+    ap.add_argument(
+        "--suite",
+        default="extended",
+        choices=["extended", "balanced18", "hard10", "all"],
+        help="test suite: extended (108 categorized), balanced18, hard10, all",
+    )
+    ap.add_argument(
+        "--max-tokens",
+        type=int,
+        default=None,
+        help="override max_tokens for all targets (default: per-tier config)",
+    )
+    ap.add_argument(
+        "--timeout",
+        type=int,
+        default=None,
+        help="override timeout seconds for all targets (default: per-tier config)",
+    )
+    ap.add_argument(
+        "--sleep",
+        type=float,
+        default=DEFAULT_CASE_SLEEP_S,
+        help="seconds after each case barrier for ALL models (use 0 to disable)",
+    )
+    ap.add_argument(
+        "--reasoning-effort",
+        default=None,
+        help="reasoning_effort param for OpenAI-compatible targets",
+    )
+    ap.add_argument(
+        "--reasoning-max-tokens",
+        type=int,
+        default=None,
+        help="OpenRouter-style reasoning.max_tokens CoT budget "
+        "(overrides tier reasoning.max_tokens / reasoningMaxTokens)",
+    )
+    ap.add_argument(
+        "--key",
+        default=None,
+        help="explicit API key (valid when a single provider is selected)",
+    )
+    ap.add_argument(
+        "--exclude",
+        default=None,
+        help="comma-separated provider names or numbers to skip (with --all-providers)",
+    )
+    ap.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="run only first N cases of the selected suite (smoke)",
+    )
+    ap.add_argument(
+        "--filter-labels",
+        default=None,
+        help="comma-separated case labels to keep (exact match), "
+        "or path to a text file with one label per line",
+    )
+    ap.add_argument(
+        "--retry-sleep",
+        type=float,
+        default=DEFAULT_RETRY_SLEEP_S,
+        help="seconds to wait before retrying after timeout/HTTP error",
+    )
+    ap.add_argument(
+        "--max-retries",
+        type=int,
+        default=DEFAULT_MAX_RETRIES,
+        help="max retries per case after first attempt (total attempts = 1 + this)",
+    )
+    ap.add_argument(
+        "--config",
+        default=None,
+        help="path to alternate agent-reviewer.json (override default config path)",
+    )
+    ap.add_argument(
+        "--cases",
+        default=None,
+        help="comma-separated case IDs to run (e.g., 'dp-07,di-01,si-01')",
+    )
+    ap.add_argument(
+        "--from-case",
+        "--start-from",
+        "--start-case",
+        default=None,
+        help="start testing from a specific case (1-based number e.g. '45' or case ID e.g. 'dp-07')",
+    )
+    ap.add_argument(
+        "--log",
+        default="/tmp/gate-unified.log",
+        help="path to log file (default: /tmp/gate-unified.log; use --no-log to disable)",
+    )
+    ap.add_argument(
+        "--no-log", action="store_true", default=False, help="disable logging to file"
+    )
+    ap.add_argument(
+        "--overwrite",
+        action="store_true",
+        default=False,
+        help="overwrite existing log file without interactive prompt (backs up old log to <file>.<timestamp>.bak)",
+    )
+    ap.add_argument(
+        "--append",
+        action="store_true",
+        default=False,
+        help="append to existing log file without interactive prompt",
+    )
     args = ap.parse_args()
 
     # Override config path if --config given
@@ -1260,10 +1458,16 @@ Examples:
         return
 
     if not args.providers and not args.all_providers:
-        ap.error("one of the arguments --providers, --all-providers, or --list is required")
+        ap.error(
+            "one of the arguments --providers, --all-providers, or --list is required"
+        )
 
     log_fp = None
-    if not args.no_log and args.log and args.log.lower() not in ("none", "off", "no", "false", ""):
+    if (
+        not args.no_log
+        and args.log
+        and args.log.lower() not in ("none", "off", "no", "false", "")
+    ):
         log_fp = setup_log_file(args.log, overwrite=args.overwrite, append=args.append)
         sys.stdout = TeeStream(sys.stdout, log_fp)
         sys.stderr = TeeStream(sys.stderr, log_fp)
@@ -1280,8 +1484,11 @@ Examples:
     if args.max_retries < 0:
         sys.exit("--max-retries must be >= 0")
     _max_retries = int(args.max_retries)
-    print(f"retry: sleep={_retry_sleep_s:g}s max_retries={_max_retries} "
-          f"(max attempts/case={1 + _max_retries})", flush=True)
+    print(
+        f"retry: sleep={_retry_sleep_s:g}s max_retries={_max_retries} "
+        f"(max attempts/case={1 + _max_retries})",
+        flush=True,
+    )
 
     sp = extract_system_prompt()
     print(f"SYSTEM_PROMPT: {len(sp)} chars", flush=True)
@@ -1301,8 +1508,10 @@ Examples:
 
     is_single = len(names) == 1
     if args.model and not is_single:
-        print("note: --model ignored in multi-provider mode (using config models)",
-              flush=True)
+        print(
+            "note: --model ignored in multi-provider mode (using config models)",
+            flush=True,
+        )
     if args.key and not is_single:
         sys.exit("--key only valid when a single provider is selected")
 
@@ -1360,8 +1569,11 @@ Examples:
         cases = [c for c in cases if c[1] in keep]
         missing = keep - {c[1] for c in cases}
         if missing:
-            print(f"note: {len(missing)} filter labels not found in suite "
-                  f"(e.g. {sorted(missing)[:3]})", flush=True)
+            print(
+                f"note: {len(missing)} filter labels not found in suite "
+                f"(e.g. {sorted(missing)[:3]})",
+                flush=True,
+            )
         print(f"filter-labels kept {len(cases)}/{before} cases", flush=True)
         if not cases:
             sys.exit("no cases left after --filter-labels")
@@ -1371,15 +1583,21 @@ Examples:
         start_num = cases[start_idx][0]
         start_label = cases[start_idx][1]
         cases = cases[start_idx:]
-        print(f"--from-case: starting from #{start_num}/{total_suite_cases} ({start_label}), {len(cases)} remaining", flush=True)
+        print(
+            f"--from-case: starting from #{start_num}/{total_suite_cases} ({start_label}), {len(cases)} remaining",
+            flush=True,
+        )
 
     if args.limit is not None:
         if args.limit < 1:
             sys.exit("--limit must be >= 1")
         cases = cases[: args.limit]
-    print(f"cases loaded: {len(cases)}"
-          + (f" of {total_suite_cases}" if len(cases) < total_suite_cases else "")
-          + (f" (limit={args.limit})" if args.limit else ""), flush=True)
+    print(
+        f"cases loaded: {len(cases)}"
+        + (f" of {total_suite_cases}" if len(cases) < total_suite_cases else "")
+        + (f" (limit={args.limit})" if args.limit else ""),
+        flush=True,
+    )
 
     payload = run_multi(targets, sp, cases, args.suite, total_cases=total_suite_cases)
 
@@ -1401,7 +1619,7 @@ Examples:
             out.write_text(json.dumps(payload["by_model"][t.label], indent=2))
             out_files.append(out)
             print(f"Saved: {out}", flush=True)
-        
+
         # Aggregate summary: scoreboard + disagreements only (no full case data)
         summary = {
             "suite": payload["suite"],
