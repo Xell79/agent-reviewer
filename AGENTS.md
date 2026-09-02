@@ -211,8 +211,11 @@ models; not usable as a suite target or live tier.
 
 **Research (in `tiers`, not in `order`):** `nim-muse-glimmer-30b`,
 `nim-nemotron-nano-9b-v2`, `nim-nemotron-lightning-30b`
-(`nvidia/nemotron-3.5-lightning-30b-a3b`), `nim-nemotron-super-120b`
-(`nvidia/nemotron-3-super-120b-a12b`), plus unused ollama/mistral bench defs.
+(`nvidia/nemotron-3.5-lightning-30b-a3b` — same id as live NIM Lightning),
+`nim-nemotron-super-120b` (`nvidia/nemotron-3-super-120b-a12b`),
+`nim-gpt-oss-20b` (`openai/gpt-oss-20b`, `reasoning_effort: low`,
+`timeoutMs: 30000`; NIM rejects `none` like Groq; chat can cold-start/timeout),
+plus unused ollama/mistral bench defs.
 
 Nemotron thinking: plugin+suite still append `/no_think` to the system
 message for any `*nemotron*` id (required for Nano 9B / Ollama Nano 30B).

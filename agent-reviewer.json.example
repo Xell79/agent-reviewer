@@ -283,6 +283,15 @@
       "jsonObject": false,
       "apiKey": "{NVIDIA_NIM_KEY}"
     },
+    "nim-gpt-oss-20b": {
+      "baseURL": "https://integrate.api.nvidia.com/v1",
+      "model": "openai/gpt-oss-20b",
+      "timeoutMs": 30000,
+      "maxTokens": 512,
+      "jsonObject": false,
+      "reasoning_effort": "low",
+      "apiKey": "{NVIDIA_NIM_KEY}"
+    },
     "kirocc-qwen3-coder-next": {
       "baseURL": "http://127.0.0.1:3456/v1",
       "model": "qwen3-coder-next",
