@@ -136,6 +136,78 @@
       "apiFormat": "cohere-v2",
       "thinkingBudget": 50
     },
+    "cohere-north-mini-code": {
+      "baseURL": "https://api.cohere.com/v2",
+      "apiKey": "{COHERE_KEY}",
+      "model": "north-mini-code",
+      "timeoutMs": 8000,
+      "maxTokens": 512,
+      "jsonObject": false,
+      "apiFormat": "cohere-v2"
+    },
+    "cohere-command-a-03-2025": {
+      "baseURL": "https://api.cohere.com/v2",
+      "apiKey": "{COHERE_KEY}",
+      "model": "command-a-03-2025",
+      "timeoutMs": 8000,
+      "maxTokens": 512,
+      "jsonObject": false,
+      "apiFormat": "cohere-v2"
+    },
+    "cohere-command-a-reasoning-08-2025": {
+      "baseURL": "https://api.cohere.com/v2",
+      "apiKey": "{COHERE_KEY}",
+      "model": "command-a-reasoning-08-2025",
+      "timeoutMs": 8000,
+      "maxTokens": 512,
+      "jsonObject": false,
+      "apiFormat": "cohere-v2"
+    },
+    "cohere-command-a-vision-07-2025": {
+      "baseURL": "https://api.cohere.com/v2",
+      "apiKey": "{COHERE_KEY}",
+      "model": "command-a-vision-07-2025",
+      "timeoutMs": 8000,
+      "maxTokens": 512,
+      "jsonObject": false,
+      "apiFormat": "cohere-v2"
+    },
+    "cohere-command-a-translate-08-2025": {
+      "baseURL": "https://api.cohere.com/v2",
+      "apiKey": "{COHERE_KEY}",
+      "model": "command-a-translate-08-2025",
+      "timeoutMs": 8000,
+      "maxTokens": 512,
+      "jsonObject": false,
+      "apiFormat": "cohere-v2"
+    },
+    "cohere-command-r7b-12-2024": {
+      "baseURL": "https://api.cohere.com/v2",
+      "apiKey": "{COHERE_KEY}",
+      "model": "command-r7b-12-2024",
+      "timeoutMs": 8000,
+      "maxTokens": 512,
+      "jsonObject": false,
+      "apiFormat": "cohere-v2"
+    },
+    "cohere-command-r-plus-08-2024": {
+      "baseURL": "https://api.cohere.com/v2",
+      "apiKey": "{COHERE_KEY}",
+      "model": "command-r-plus-08-2024",
+      "timeoutMs": 8000,
+      "maxTokens": 512,
+      "jsonObject": false,
+      "apiFormat": "cohere-v2"
+    },
+    "cohere-command-r-08-2024": {
+      "baseURL": "https://api.cohere.com/v2",
+      "apiKey": "{COHERE_KEY}",
+      "model": "command-r-08-2024",
+      "timeoutMs": 8000,
+      "maxTokens": 512,
+      "jsonObject": false,
+      "apiFormat": "cohere-v2"
+    },
     "xiaomi-mimo": {
       "baseURL": "https://token-plan-sgp.xiaomimimo.com/v1",
       "apiKey": "{MIMO_KEY}",
