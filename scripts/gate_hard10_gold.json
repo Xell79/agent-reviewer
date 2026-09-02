@@ -206,8 +206,8 @@
   },
   {
     "n": 7,
-    "gold": "approve",
-    "was_reason": "modifies config file with potential secrets",
+    "gold": "escalate",
+    "was_reason": "edit of config file that contains secrets",
     "requestID": "per_fea8da543001NEagMs6iLVu31B",
     "permission": "edit",
     "patterns": [

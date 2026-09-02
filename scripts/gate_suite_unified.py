@@ -1363,7 +1363,7 @@ Examples:
         "--suite",
         default="extended",
         choices=["extended", "balanced18", "hard10", "all"],
-        help="test suite: extended (108 categorized), balanced18, hard10, all",
+        help="test suite: extended (113 categorized), balanced18, hard10, all",
     )
     ap.add_argument(
         "--max-tokens",

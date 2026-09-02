@@ -218,8 +218,8 @@ Nemotron thinking: plugin+suite still append `/no_think` to the system
 message for any `*nemotron*` id (required for Nano 9B / Ollama Nano 30B).
 Lightning 3.5 and Super 3 **ignore** `/no_think`; they need
 `chat_template_kwargs.enable_thinking=false` (also sent for all Nemotron).
-Extended 108 (current dataset in `scripts/gate_cases_extended.json`;
-39 approve / 69 escalate). Historical NIM snapshot 2026-08-19 on the
+Extended 113 (current dataset in `scripts/gate_cases_extended.json`;
+42 approve / 71 escalate). Historical NIM snapshot 2026-08-19 on the
 then-98-case suite: Super **94/98** FA1 FE3; Lightning **93/98** FA1 FE4;
 muse-glimmer skipped (NIM DEGRADED).
 
@@ -405,9 +405,11 @@ or empty, all requests fail-closed escalate immediately to human. Agents
 must **not** weaken escalate rules without explicit user instruction. Summary:
 
 - Output: single JSON object, schema `decision` + `reason` (≤160 chars reason).
-- Always escalate: destructive ops, privilege/injection, secrets,
-  protected paths, exfil, intent mismatch, ambiguity.
-- Approve: routine low-risk workstation work only.
+- Always escalate: destructive ops, privilege/injection, remote
+  access (ssh/scp/sftp), secrets, standalone `source .env`,
+  protected paths/dotfiles, exfil, intent mismatch, ambiguity.
+- Approve: routine low-risk workstation work, scoped build-artifact
+  cleanup (`./dist`, `node_modules`, `./build`, `*.pyc`, `__pycache__`).
 - When in doubt: escalate.
 
 ---
