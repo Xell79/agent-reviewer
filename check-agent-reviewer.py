@@ -52,7 +52,14 @@ DESCRIPTION = (
 )
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_CONFIG = SCRIPT_DIR / "agent-reviewer.json"
+DEFAULT_CONFIG = Path(
+    os.environ.get(
+        "AGENT_REVIEWER_CONFIG",
+        SCRIPT_DIR / "agent-reviewer.json"
+        if (SCRIPT_DIR / "agent-reviewer.json").is_file()
+        else os.path.expanduser("~/.config/kilo/agent-reviewer.json"),
+    )
+)
 
 OK, FAIL, SKIP = "OK", "FAIL", "SKIP"
 PENDING, CHECKING, RETRY, WAIT, INTERRUPTED = (
@@ -529,31 +536,141 @@ async def probe_model(
     return res
 
 
-def iter_checks(
-    cfg: dict[str, Any], only: set[str] | None,
-) -> list[tuple[str, dict[str, Any]]]:
-    """Tiers from `order` first (in listed order), then the rest (config order)."""
-    tiers: dict[str, Any] = cfg.get("tiers") or {}
-    order: list[str] = cfg.get("order") or []
-    queue: list[tuple[str, dict[str, Any]]] = []
+def build_tier_index(
+    cfg: dict[str, Any],
+) -> tuple[list[str], list[str], dict[str, Any]]:
+    """Build tier index: tier_index (order first, then remainder), order list, and tiers dict."""
+    tiers_raw = cfg.get("tiers") or {}
+    order_raw = cfg.get("order") or []
 
+    tiers: dict[str, Any] = {}
+    if isinstance(tiers_raw, dict):
+        tiers = {k: v for k, v in tiers_raw.items() if isinstance(v, dict)}
+    elif isinstance(tiers_raw, list):
+        for t in tiers_raw:
+            if isinstance(t, dict) and t.get("name"):
+                tiers[t["name"]] = t
+
+    order: list[str] = []
+    if isinstance(order_raw, list):
+        for n in order_raw:
+            if n in tiers:
+                order.append(n)
+            else:
+                print(
+                    paint(f"warning: order lists unknown tier {n!r}", YELLOW),
+                    file=sys.stderr,
+                )
+
+    seen: set[str] = set()
+    tier_index: list[str] = []
     for name in order:
-        if name not in tiers:
+        if name not in seen:
+            tier_index.append(name)
+            seen.add(name)
+    for name in tiers:
+        if name not in seen:
+            tier_index.append(name)
+            seen.add(name)
+
+    return tier_index, order, tiers
+
+
+def print_tiers_list(
+    config_path: Path, tier_index: list[str], order: list[str], tiers: dict[str, Any],
+) -> None:
+    """Print numbered list of all available tiers from config."""
+    print(f"\nAvailable tiers in {config_path}:")
+    for idx, name in enumerate(tier_index, start=1):
+        t = tiers.get(name, {})
+        model = t.get("model", "unknown")
+        disabled = " [disabled]" if t.get("disabled") is True else ""
+        in_order = (
+            f"(active order #{order.index(name) + 1})"
+            if name in order
+            else "(research / not in active order)"
+        )
+        print(f"  [{idx:2d}] {name:<26} [model: {model}]{disabled} {in_order}")
+    print()
+
+
+def resolve_tier_names(
+    raw_spec: str, tier_index: list[str], tiers: dict[str, Any],
+) -> list[str]:
+    """Parse comma-separated tier names, numbers, or ranges (e.g. '1,3', '1-4', 'ollama-gemma4-31b')."""
+    tokens = [t.strip() for t in raw_spec.split(",") if t.strip()]
+    resolved: list[str] = []
+    seen: set[str] = set()
+
+    def add_name(name: str) -> None:
+        if name not in seen:
+            resolved.append(name)
+            seen.add(name)
+
+    for tok in tokens:
+        # Check range: e.g. "1-3"
+        m_range = re.match(r"^(\d+)\s*-\s*(\d+)$", tok)
+        if m_range:
+            start, end = int(m_range.group(1)), int(m_range.group(2))
+            if start < 1 or end > len(tier_index) or start > end:
+                print(
+                    paint(
+                        f"invalid tier range '{tok}'. Valid range: 1..{len(tier_index)}. "
+                        "Use --list to view all tiers.",
+                        RED,
+                    ),
+                    file=sys.stderr,
+                )
+                sys.exit(2)
+            for i in range(start, end + 1):
+                add_name(tier_index[i - 1])
+            continue
+
+        # Check single integer: e.g. "2"
+        if tok.isdigit():
+            idx = int(tok)
+            if 1 <= idx <= len(tier_index):
+                add_name(tier_index[idx - 1])
+                continue
             print(
-                paint(f"warning: order lists unknown tier {name!r}", YELLOW),
+                paint(
+                    f"invalid tier number '{tok}'. Valid numbers: 1..{len(tier_index)}. "
+                    "Use --list to view all tiers.",
+                    RED,
+                ),
                 file=sys.stderr,
             )
-            continue
-        if only and name not in only:
-            continue
-        queue.append((name, tiers[name]))
+            sys.exit(2)
 
-    for name, tier_cfg in tiers.items():
-        if name in order:
-            continue
-        if only and name not in only:
-            continue
-        queue.append((name, tier_cfg))
+        # Check name
+        if tok in tiers:
+            add_name(tok)
+        else:
+            print(
+                paint(
+                    f"unknown tier '{tok}'. Use --list to view all available tiers.",
+                    RED,
+                ),
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+    return resolved
+
+
+def iter_checks(
+    tiers: dict[str, Any], selected_names: list[str],
+) -> list[tuple[str, dict[str, Any]]]:
+    """Return list of (tier_name, tier_cfg) for the selected tiers."""
+    queue: list[tuple[str, dict[str, Any]]] = []
+    for name in selected_names:
+        if name in tiers:
+            queue.append((name, tiers[name]))
+        else:
+            print(
+                paint(f"warning: unknown tier {name!r}", YELLOW),
+                file=sys.stderr,
+            )
     return queue
 
 
@@ -867,7 +984,20 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=DESCRIPTION)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument(
-        "--only", help="comma-separated tier names to check (default: all)",
+        "--list",
+        "--list-tiers",
+        action="store_true",
+        default=False,
+        help="list all available tiers with 1-based numbers and exit",
+    )
+    parser.add_argument(
+        "--tiers",
+        "--only",
+        default=None,
+        help=(
+            "comma-separated tier names, 1-based numbers, or ranges "
+            "(e.g. '1,3', '1-4', 'ollama-gemma4-31b') (default: all)"
+        ),
     )
     parser.add_argument(
         "--sleep",
@@ -905,8 +1035,18 @@ def main() -> int:
     use_unicode = _utf8_stdout()
 
     cfg = load_config(args.config)
-    only = {s.strip() for s in args.only.split(",")} if args.only else None
-    queue = iter_checks(cfg, only)
+    tier_index, order, tiers = build_tier_index(cfg)
+
+    if args.list:
+        print_tiers_list(args.config, tier_index, order, tiers)
+        return 0
+
+    if args.tiers:
+        selected_names = resolve_tier_names(args.tiers, tier_index, tiers)
+    else:
+        selected_names = tier_index
+
+    queue = iter_checks(tiers, selected_names)
     if not queue:
         print(paint("no tiers to check", YELLOW), file=sys.stderr)
         return 2

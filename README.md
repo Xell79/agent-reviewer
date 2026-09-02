@@ -237,11 +237,16 @@ models that share a provider stay sequential (`--sleep` / retries).
 # default config: ./agent-reviewer.json next to the script (gitignored)
 python3 check-agent-reviewer.py
 
+# list all configured tiers with 1-based indices
+python3 check-agent-reviewer.py --list
+
 # canonical live path after install
 python3 check-agent-reviewer.py --config ~/.config/kilo/agent-reviewer.json
 
-# subset
-python3 check-agent-reviewer.py --only ollama-gemma4-31b,groq-qwen36-27b
+# subset by name, 1-based number, or range
+python3 check-agent-reviewer.py --tiers ollama-gemma4-31b,groq-qwen36-27b
+python3 check-agent-reviewer.py --tiers 1,3
+python3 check-agent-reviewer.py --tiers 1-4
 ```
 
 On a TTY the full probe list is drawn first and rewritten in place.
@@ -267,7 +272,8 @@ look sensitive.
 | Flag | Default | |
 |------|---------|---|
 | `--config` | `./agent-reviewer.json` | same schema as the plugin |
-| `--only` | all | comma-separated tier names |
+| `--list` | false | list all available tiers with 1-based numbers and exit |
+| `--tiers` (or `--only`) | all | comma-separated tier names, numbers, or ranges (e.g. `1,3`, `1-4`) |
 | `--sleep` | `12` | seconds between checks of the same `baseURL` |
 | `--retries` | `2` | extra attempts on network / 429 / 5xx |
 | `--retry-sleep` | `60` | seconds before a retry |
