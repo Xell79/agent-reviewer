@@ -774,8 +774,11 @@ def call_model(
                 "error": f"HTTP {e.code}: {body_txt}",
                 "ms": int((time.time() - t0) * 1000),
             }
-            # Retry on rate-limit / overload / 502 gateway flakes.
-            if e.code in (429, 502, 503, 529) and attempt < max_attempts - 1:
+            # Retry on rate-limit / overload / gateway flakes.
+            # NIM/NVCF often returns empty HTTP 404 ("function not found")
+            # or 500 worker errors on cold-start while the same model id
+            # succeeds on the next attempt (~0.6s 404 then 200).
+            if e.code in (404, 429, 500, 502, 503, 529) and attempt < max_attempts - 1:
                 wait = _retry_sleep_s
                 print(
                     f"    [{target.label}] retry {wait:g}s "
