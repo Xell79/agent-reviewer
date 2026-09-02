@@ -27,7 +27,7 @@ import {
 } from "./lib/least-connections.ts";
 
 /** Semver; keep in sync with root `VERSION`. Not a named export (Kilo auto-scan). */
-const PLUGIN_VERSION = "0.5.1";
+const PLUGIN_VERSION = "0.6.0";
 
 // ---------------------------------------------------------------------------
 // File-based debug log (survives when client.app.log is silent / hanging).
@@ -1095,15 +1095,18 @@ function isNemotronModel(model: string): boolean {
 }
 
 /**
+ * Official chat_template_kwargs.enable_thinking=false off-switch.
  * Nemotron 3 Super / 3.5 Lightning ignore `/no_think` (CoT stays on, finish=length).
- * Official NIM/HF switch: chat_template_kwargs.enable_thinking=false.
- * Safe extra on older Nano / Ollama when combined with `/no_think`.
+ * Poolside Laguna S 2.1 documents the same kwargs on inference.poolside.ai.
  */
-function nemotronDisableThinkingKwargs(
+function disableThinkingKwargs(
 	model: string,
 ): Record<string, unknown> | undefined {
-	if (!isNemotronModel(model)) return undefined;
-	return { enable_thinking: false };
+	const m = (model || "").toLowerCase();
+	if (/nemotron/i.test(m) || /laguna/i.test(m) || m.startsWith("poolside/")) {
+		return { enable_thinking: false };
+	}
+	return undefined;
 }
 
 /**
@@ -1216,8 +1219,8 @@ async function callReviewerOnce(
 		) {
 			body.reasoning = { max_tokens: tier.reasoningMaxTokens };
 		}
-		// Nemotron 3 Super / 3.5 Lightning: /no_think is ignored; official off-switch.
-		const thinkKw = nemotronDisableThinkingKwargs(model);
+		// Nemotron Super/Lightning + Poolside Laguna: official thinking off-switch.
+		const thinkKw = disableThinkingKwargs(model);
 		if (!isCohereV2 && thinkKw) {
 			body.chat_template_kwargs = thinkKw;
 		}
@@ -1238,7 +1241,7 @@ async function callReviewerOnce(
 		enableThinking:
 			isAnthropic || isCohereV2
 				? undefined
-				: !nemotronDisableThinkingKwargs(model)
+				: !disableThinkingKwargs(model)
 					? undefined
 					: false,
 		headerKeys: tier.headers ? Object.keys(tier.headers) : undefined,

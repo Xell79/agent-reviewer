@@ -47,6 +47,15 @@
       "timeoutMs": 8000,
       "jsonObject": false
     },
+    "poolside-laguna-s-2_1": {
+      "baseURL": "https://inference.poolside.ai/v1",
+      "apiKey": "{POOLSIDE_KEY}",
+      "apiKeyEnv": "POOLSIDE_API_KEY",
+      "model": "poolside/laguna-s-2.1",
+      "timeoutMs": 8000,
+      "maxTokens": 512,
+      "jsonObject": false
+    },
     "kilo-nemotron-3.5-lightning": {
       "baseURL": "https://app.kilo.ai/api/gateway/v1",
       "apiKey": "{KILO_GATEWAY_KEY}",

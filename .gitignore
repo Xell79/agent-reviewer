@@ -21,6 +21,13 @@ docs/
 results/
 /tmp/
 systemPrompt*
+*.log
+*.log.*
+*.bak
+
+# Markdown — keep only README.md
+*.md
+!README.md
 
 # Editor / agent
 .kilo/

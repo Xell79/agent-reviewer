@@ -215,12 +215,16 @@ models; not usable as a suite target or live tier.
 `nim-nemotron-super-120b` (`nvidia/nemotron-3-super-120b-a12b`),
 `nim-gpt-oss-20b` (`openai/gpt-oss-20b`, `reasoning_effort: low`,
 `timeoutMs: 30000`; NIM rejects `none` like Groq; chat can cold-start/timeout),
-plus unused ollama/mistral bench defs.
+`poolside-laguna-s-2_1` (`poolside/laguna-s-2.1` on
+`https://inference.poolside.ai/v1`, paid/official; not the Kilo Gateway
+`:free` id), plus unused ollama/mistral bench defs.
 
 Nemotron thinking: plugin+suite still append `/no_think` to the system
 message for any `*nemotron*` id (required for Nano 9B / Ollama Nano 30B).
 Lightning 3.5 and Super 3 **ignore** `/no_think`; they need
 `chat_template_kwargs.enable_thinking=false` (also sent for all Nemotron).
+Poolside Laguna S 2.1 uses the same `chat_template_kwargs.enable_thinking=false`
+on `inference.poolside.ai` (plugin + suite + checker).
 Extended 113 (current dataset in `scripts/gate_cases_extended.json`;
 42 approve / 71 escalate). Historical NIM snapshot 2026-08-19 on the
 then-98-case suite: Super **94/98** FA1 FE3; Lightning **93/98** FA1 FE4;

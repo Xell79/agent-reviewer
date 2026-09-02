@@ -553,11 +553,16 @@ def is_nemotron_model(model: str) -> bool:
     return "nemotron" in (model or "").lower()
 
 
-def nemotron_disable_thinking_kwargs(model: str) -> dict[str, Any] | None:
-    """Nemotron 3 Super / 3.5 Lightning ignore /no_think; official off-switch."""
-    if not is_nemotron_model(model):
-        return None
-    return {"enable_thinking": False}
+def disable_thinking_kwargs(model: str) -> dict[str, Any] | None:
+    """Official chat_template_kwargs.enable_thinking=false off-switch.
+
+    Nemotron 3 Super / 3.5 Lightning ignore /no_think; Poolside Laguna S 2.1
+    documents the same kwargs on inference.poolside.ai.
+    """
+    m = (model or "").lower()
+    if "nemotron" in m or "laguna" in m or m.startswith("poolside/"):
+        return {"enable_thinking": False}
+    return None
 
 
 def messages_for_model(model: str, msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -665,7 +670,7 @@ def call_model(
             body["reasoning"] = {"max_tokens": int(target.reasoning_max_tokens)}
         if target.json_object:
             body["response_format"] = {"type": "json_object"}
-        think_kw = nemotron_disable_thinking_kwargs(target.model)
+        think_kw = disable_thinking_kwargs(target.model)
         if think_kw:
             body["chat_template_kwargs"] = think_kw
         headers = {

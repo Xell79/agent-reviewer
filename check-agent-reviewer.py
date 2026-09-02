@@ -346,6 +346,17 @@ def build_request_parts(
     ):
         body["reasoning"] = {"max_tokens": int(reasoning_max)}
 
+    model_l = (model or "").lower()
+    if (
+        not is_cohere_v2
+        and (
+            "nemotron" in model_l
+            or "laguna" in model_l
+            or model_l.startswith("poolside/")
+        )
+    ):
+        body["chat_template_kwargs"] = {"enable_thinking": False}
+
     return url, body, merge_headers(api_key, tier_cfg)
 
 
