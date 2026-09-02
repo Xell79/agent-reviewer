@@ -691,7 +691,6 @@ def call_model(
                 data = json.loads(r.read())
             ms = int((time.time() - t0) * 1000)
             text = extract_text(data)
-            usage = data.get("usage") or {}
             # finish reason: Anthropic stop_reason, OpenAI choices[0].finish_reason; Cohere v2 top-level
             if is_anthropic:
                 finish = data.get("stop_reason") or ""
@@ -705,18 +704,42 @@ def call_model(
                 ch = (data.get("choices") or [{}])[0]
                 finish = ch.get("finish_reason", "") or ""
             d, reason, method = parse(text)
-            # Cohere v2 usage keys differ slightly
-            ptok = usage.get("prompt_tokens") or usage.get("input_tokens")
-            ctok = usage.get("completion_tokens") or usage.get("output_tokens")
-            ttok = usage.get("total_tokens")
+
+            raw_usage = data.get("usage")
+            usage_dict: dict[str, Any] = (
+                raw_usage if isinstance(raw_usage, dict) else {}
+            )
+            raw_tokens = usage_dict.get("tokens")
+            tokens_obj: dict[str, Any] = (
+                raw_tokens if isinstance(raw_tokens, dict) else {}
+            )
+            raw_details = usage_dict.get("completion_tokens_details")
+            details: dict[str, Any] = (
+                raw_details if isinstance(raw_details, dict) else {}
+            )
+
+            ptok: int | None = usage_dict.get("prompt_tokens")
+            if ptok is None:
+                ptok = usage_dict.get("input_tokens")
+            if ptok is None:
+                ptok = tokens_obj.get("input_tokens")
+
+            ctok: int | None = usage_dict.get("completion_tokens")
+            if ctok is None:
+                ctok = usage_dict.get("output_tokens")
+            if ctok is None:
+                ctok = tokens_obj.get("output_tokens")
+
+            ttok: int | None = usage_dict.get("total_tokens")
             if ttok is None and ptok is not None and ctok is not None:
                 ttok = ptok + ctok
-            rtok = None
-            details = (
-                usage.get("completion_tokens_details") or usage.get("tokens") or {}
-            )
-            if isinstance(details, dict):
-                rtok = details.get("reasoning_tokens") or details.get("thinking_tokens")
+
+            rtok: int | None = details.get("reasoning_tokens")
+            if rtok is None:
+                rtok = tokens_obj.get("reasoning_tokens")
+            if rtok is None:
+                rtok = details.get("thinking_tokens")
+
             result = {
                 "decision": d,
                 "reason": reason,
