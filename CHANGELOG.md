@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-03
+
+### Changed
+
+- **SystemPrompt optimization**: Reduced from 402 to 238 words (−40.8%, ~220 tokens saved per request) by removing redundant parenthetical examples, condensing principles, and tightening qualifiers. Added explicit `piped stdin`, `&`, `tmux/screen` to encapsulation and backgrounding rules. Validated on balanced18 (18/18) and extended suite (49/50, one low-severity false-approve on test fixture).
+
 ## [0.6.0] - 2026-09-02
 
 ### Added
@@ -205,6 +211,7 @@ Smoke test: gemma4:31b 3/3 on obfuscation (dp-07 `base64|sh`, dp-08 `curl|base64
 - systemPrompt v6: form-based inline escalate (`runs arbitrary inline code`)
 - VERSION / PLUGIN_VERSION sync, `gh release create` with CHANGELOG notes
 
+[0.6.1]: https://github.com/Xell79/agent-reviewer/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/Xell79/agent-reviewer/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/Xell79/agent-reviewer/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Xell79/agent-reviewer/compare/v0.4.0...v0.5.0
